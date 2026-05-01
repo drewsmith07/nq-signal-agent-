@@ -1101,17 +1101,21 @@ async function getAICommentary(ind) {
   const el = document.getElementById('aiCommentary');
   el.innerHTML = '<div class="ai-loading"><div class="ai-spinner"></div> Analyzing...</div>';
 
-  const prompt = `You are a professional NQ futures scalping analyst. Based on these indicators, give a 2-3 sentence market commentary and trading rationale. Be direct and specific.
+  const prompt = `You are a trading coach explaining NQ futures signals to someone still learning. Be clear, specific, and educational — explain what you saw in the market that led to this signal.
 
-Signal: ${ind.signal} (confidence: ${ind.confidence}%, score: ${ind.score})
+Current Signal: ${ind.signal} (confidence: ${ind.confidence}%, score: ${ind.score})
 Price: ${ind.price} | VWAP: ${ind.vwapVal}
-RSI: ${ind.rsiVal} | MACD Hist: ${ind.macdHist}
-BB Position: ${(ind.bbPos*100).toFixed(0)}% | ATR: ${ind.atrVal}
+RSI: ${ind.rsiVal} | MACD Histogram: ${ind.macdHist}
+BB Position: ${(ind.bbPos*100).toFixed(0)}% of band | ATR: ${ind.atrVal}
 Support: ${ind.support} | Resistance: ${ind.resistance}
-Volume ratio: ${ind.volRatio}x | Patterns: ${ind.patterns.map(p=>p[0]).join(', ') || 'none'}
-Key reasons: ${ind.reasons.slice(0,4).join('; ')}
+Volume ratio: ${ind.volRatio}x average | Patterns detected: ${ind.patterns.map(p=>p[0]).join(', ') || 'none'}
+Reasons that fired: ${ind.reasons.join('; ')}
 
-Note: This is simulated data for demonstration purposes.`;
+Write 3-4 sentences in plain English:
+1. Start with exactly what triggered the ${ind.signal} signal (which specific indicators lined up)
+2. Explain what each key indicator is showing right now in simple terms a beginner can understand
+3. Tell me what to watch for next — what would confirm or cancel this signal
+Keep it conversational, no jargon without explanation.`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
