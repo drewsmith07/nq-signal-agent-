@@ -197,13 +197,41 @@ def index():
             return f.read(), 200, {'Content-Type': 'text/html'}
     return "<h1>Dashboard not found. Make sure nq_dashboard.html is in the same folder as nq_agent.py</h1>", 404
 
-@app.route('/signal')
+# Pushover config
+PUSHOVER_TOKEN = "av7z24evdn1h55qqkk4gxptm94uk9q"
+PUSHOVER_USER  = "ui2s5wt3qxb1zt75sphspwubx4ntac"
+last_signal = {"signal": "HOLD", "price": 0}
+
+def send_pushover(signal, price, confidence, score):
+    try:
+        import urllib.request, urllib.parse
+        emoji = "🟢" if signal == "BUY" else "🔴" if signal == "SELL" else "⚪"
+        message = f"{emoji} {signal} — NQ at {price:,.2f}
+Confidence: {confidence:.1f}% | Score: {score:+.3f}"
+        data = urllib.parse.urlencode({
+            "token": PUSHOVER_TOKEN, "user": PUSHOVER_USER,
+            "title": f"NQ Signal: {signal}", "message": message,
+            "priority": 1 if signal != "HOLD" else 0,
+            "sound": "cashregister" if signal == "BUY" else "siren" if signal == "SELL" else "none"
+        }).encode()
+        urllib.request.urlopen(urllib.request.Request("https://api.pushover.net/1/messages.json", data=data), timeout=5)
+        print(f"📱 Pushover sent: {signal} @ {price}")
+    except Exception as e:
+        print(f"Pushover error: {e}")
+
+@app.route("/signal")
 def get_signal():
+    global last_signal
     try:
         df = yf.Ticker(TICKER).history(interval="5m", period="2d")
         if df.empty:
             return jsonify({"error": "No data returned"}), 500
-        return jsonify(generate_signal(df))
+        result = generate_signal(df)
+        new_sig = result["signal"]
+        if new_sig != last_signal["signal"] and new_sig in ("BUY", "SELL"):
+            send_pushover(new_sig, result["price"], result["confidence"], result["score"])
+        last_signal = {"signal": new_sig, "price": result["price"]}
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
