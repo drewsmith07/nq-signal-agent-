@@ -205,9 +205,8 @@ last_signal = {"signal": "HOLD", "price": 0}
 def send_pushover(signal, price, confidence, score):
     try:
         import urllib.request, urllib.parse
-        emoji = "🟢" if signal == "BUY" else "🔴" if signal == "SELL" else "⚪"
-        message = f"{emoji} {signal} — NQ at {price:,.2f}
-Confidence: {confidence:.1f}% | Score: {score:+.3f}"
+        message = signal + ' - NQ at ' + str(round(price, 2)) + ', Conf: ' + str(round(confidence, 1)) + '%, Score: ' + str(round(score, 3))
+
         data = urllib.parse.urlencode({
             "token": PUSHOVER_TOKEN, "user": PUSHOVER_USER,
             "title": f"NQ Signal: {signal}", "message": message,
