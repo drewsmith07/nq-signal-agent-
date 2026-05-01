@@ -549,6 +549,19 @@
     .indicators-grid { grid-template-columns: repeat(2, 1fr); }
     .bottom-grid { grid-template-columns: 1fr; }
   }
+
+  .tf-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tf-btn:hover, .tf-btn.active { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
@@ -628,14 +641,21 @@
   <!-- Chart -->
   <div class="chart-container">
     <div class="chart-header">
-      <div class="chart-title">Price Action · 5m · Last 60 candles</div>
-      <div class="chart-legend">
-        <div class="legend-item"><div class="legend-dot" style="background:#00d4ff"></div> Price</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#ffd700"></div> VWAP</div>
-        <div class="legend-item"><div class="legend-dot" style="background:#4a6070"></div> BB</div>
+      <div class="chart-title" id="chartTitle">Price Action · 5m</div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="chart-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#ffd700;height:2px"></div> VWAP</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#4a6070;height:2px"></div> BB</div>
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button class="tf-btn active" onclick="switchTimeframe('1m')" id="tf-1m">1m</button>
+          <button class="tf-btn active" onclick="switchTimeframe('5m')" id="tf-5m" style="opacity:1;border-color:var(--accent)">5m</button>
+          <button class="tf-btn" onclick="switchTimeframe('1h')" id="tf-1h">1h</button>
+        </div>
       </div>
     </div>
-    <canvas id="priceChart" height="160"></canvas>
+    <div id="tvChart" style="height:280px;"></div>
+    <div id="chartTooltip" style="display:none;position:absolute;background:rgba(13,17,23,0.95);border:1px solid var(--border);padding:8px 12px;font-family:var(--mono);font-size:11px;pointer-events:none;z-index:10;line-height:1.8;"></div>
   </div>
 
   <!-- Indicators -->
@@ -707,6 +727,7 @@
   <div class="timestamp" id="lastUpdated">Last updated: —</div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.1/lightweight-charts.standalone.production.js"></script>
 <script>
 // ─── Simulated NQ data generator ─────────────────────────────────────────────
 function generateNQData() {
@@ -868,106 +889,122 @@ function computeIndicators(prices, highs, lows, opens, vols) {
   };
 }
 
-// ─── Chart ────────────────────────────────────────────────────────────────────
-let chartInstance = null;
+// ─── Chart (TradingView Lightweight Charts) ───────────────────────────────────
+let tvChart = null;
+let candleSeries = null;
+let vwapSeries = null;
+let bbUpperSeries = null;
+let bbLowerSeries = null;
+let currentTf = '5m';
+let lastChartData = null;
 
-function drawChart(prices, highs, lows, opens, timestamps, ind) {
-  const canvas = document.getElementById('priceChart');
-  const ctx = canvas.getContext('2d');
+function initChart() {
+  const container = document.getElementById('tvChart');
+  if (tvChart) { tvChart.remove(); tvChart = null; }
 
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = 160 * dpr;
-  ctx.scale(dpr, dpr);
-  const W = rect.width, H = 160;
-
-  const allPrices = [...prices, ...ind.bbUpperArr.filter(Boolean), ...ind.bbLowerArr.filter(Boolean)];
-  const minP = Math.min(...allPrices) - 10;
-  const maxP = Math.max(...allPrices) + 10;
-  const scaleY = v => H - ((v - minP) / (maxP - minP)) * H;
-
-  const n = prices.length;
-  const barW = W / n;
-
-  // Background glow for last candle
-  ctx.clearRect(0, 0, W, H);
-
-  // Draw BB bands fill
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    if (ind.bbUpperArr[i] === null) continue;
-    const x = i * barW + barW/2;
-    if (i === 0 || ind.bbUpperArr[i-1] === null) ctx.moveTo(x, scaleY(ind.bbUpperArr[i]));
-    else ctx.lineTo(x, scaleY(ind.bbUpperArr[i]));
-  }
-  for (let i = n-1; i >= 0; i--) {
-    if (ind.bbLowerArr[i] === null) continue;
-    ctx.lineTo(i * barW + barW/2, scaleY(ind.bbLowerArr[i]));
-  }
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(74,96,112,0.08)';
-  ctx.fill();
-
-  // BB lines
-  [ind.bbUpperArr, ind.bbLowerArr].forEach(arr => {
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i < n; i++) {
-      if (arr[i] === null) continue;
-      const x = i * barW + barW/2;
-      if (!started) { ctx.moveTo(x, scaleY(arr[i])); started = true; }
-      else ctx.lineTo(x, scaleY(arr[i]));
-    }
-    ctx.strokeStyle = 'rgba(74,96,112,0.4)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+  tvChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth,
+    height: 280,
+    layout: { background: { color: 'transparent' }, textColor: '#4a6070' },
+    grid: { vertLines: { color: 'rgba(26,35,50,0.5)' }, horzLines: { color: 'rgba(26,35,50,0.5)' } },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    rightPriceScale: { borderColor: '#1a2332' },
+    timeScale: { borderColor: '#1a2332', timeVisible: true, secondsVisible: false },
+    handleScroll: true,
+    handleScale: true,
   });
 
-  // VWAP line
-  ctx.beginPath();
+  candleSeries = tvChart.addCandlestickSeries({
+    upColor: '#00ff88', downColor: '#ff3b5c',
+    borderUpColor: '#00ff88', borderDownColor: '#ff3b5c',
+    wickUpColor: '#00ff88', wickDownColor: '#ff3b5c',
+  });
+
+  vwapSeries = tvChart.addLineSeries({ color: 'rgba(255,215,0,0.6)', lineWidth: 1, priceLineVisible: false });
+  bbUpperSeries = tvChart.addLineSeries({ color: 'rgba(74,96,112,0.4)', lineWidth: 1, priceLineVisible: false, lineStyle: 2 });
+  bbLowerSeries = tvChart.addLineSeries({ color: 'rgba(74,96,112,0.4)', lineWidth: 1, priceLineVisible: false, lineStyle: 2 });
+
+  // Tooltip
+  tvChart.subscribeCrosshairMove(param => {
+    const tooltip = document.getElementById('chartTooltip');
+    if (!param.time || !param.seriesData.size) { tooltip.style.display = 'none'; return; }
+    const data = param.seriesData.get(candleSeries);
+    if (!data) { tooltip.style.display = 'none'; return; }
+    const change = data.close - data.open;
+    const changePct = (change / data.open * 100).toFixed(2);
+    tooltip.innerHTML =
+      '<span style="color:var(--muted)">O</span> ' + data.open.toFixed(2) +
+      '  <span style="color:var(--muted)">H</span> ' + data.high.toFixed(2) +
+      '  <span style="color:var(--muted)">L</span> ' + data.low.toFixed(2) +
+      '  <span style="color:var(--muted)">C</span> <span style="color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + data.close.toFixed(2) + '</span>' +
+      '  <span style="color:' + (change >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (change >= 0 ? '+' : '') + change.toFixed(2) + ' (' + changePct + '%)</span>';
+    tooltip.style.display = 'block';
+    tooltip.style.left = '20px';
+    tooltip.style.top = '50px';
+  });
+
+  window.addEventListener('resize', () => { if (tvChart) tvChart.applyOptions({ width: container.clientWidth }); });
+}
+
+function updateChart(data, ind) {
+  lastChartData = { data, ind };
+  if (!tvChart) initChart();
+
+  const n = data.prices.length;
+  const candles = [], vwapData = [], bbUpData = [], bbLoData = [];
+
   for (let i = 0; i < n; i++) {
-    const x = i * barW + barW/2;
-    if (i === 0) ctx.moveTo(x, scaleY(ind.vwapArr[i]));
-    else ctx.lineTo(x, scaleY(ind.vwapArr[i]));
-  }
-  ctx.strokeStyle = 'rgba(255,215,0,0.5)';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  // Candlesticks
-  const cW = Math.max(barW * 0.6, 2);
-  for (let i = 0; i < n; i++) {
-    const x = i * barW + barW/2;
-    const isBull = prices[i] >= opens[i];
-    const col = isBull ? '#00ff88' : '#ff3b5c';
-
-    // Wick
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, scaleY(highs[i]));
-    ctx.lineTo(x, scaleY(lows[i]));
-    ctx.stroke();
-
-    // Body
-    const bodyTop = scaleY(Math.max(prices[i], opens[i]));
-    const bodyBot = scaleY(Math.min(prices[i], opens[i]));
-    const bH = Math.max(bodyBot - bodyTop, 1);
-    ctx.fillStyle = isBull ? 'rgba(0,255,136,0.7)' : 'rgba(255,59,92,0.7)';
-    ctx.fillRect(x - cW/2, bodyTop, cW, bH);
+    const ts = Math.floor(new Date(data.timestamps[i]).getTime() / 1000);
+    candles.push({ time: ts, open: data.opens[i], high: data.highs[i], low: data.lows[i], close: data.prices[i] });
+    vwapData.push({ time: ts, value: ind.vwapArr[i] });
+    if (ind.bbUpperArr[i] !== null) {
+      bbUpData.push({ time: ts, value: ind.bbUpperArr[i] });
+      bbLoData.push({ time: ts, value: ind.bbLowerArr[i] });
+    }
   }
 
-  // Price line overlay
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const x = i * barW + barW/2;
-    if (i === 0) ctx.moveTo(x, scaleY(prices[i]));
-    else ctx.lineTo(x, scaleY(prices[i]));
+  candleSeries.setData(candles);
+  vwapSeries.setData(vwapData);
+  bbUpperSeries.setData(bbUpData);
+  bbLowerSeries.setData(bbLoData);
+  tvChart.timeScale().fitContent();
+}
+
+async function switchTimeframe(tf) {
+  currentTf = tf;
+  // Update button styles
+  ['1m','5m','1h'].forEach(t => {
+    const btn = document.getElementById('tf-' + t);
+    if (btn) { btn.style.borderColor = t === tf ? 'var(--accent)' : ''; btn.style.color = t === tf ? 'var(--accent)' : ''; }
+  });
+  document.getElementById('chartTitle').textContent = 'Price Action · ' + tf;
+
+  // Fetch new data from agent
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch('/signal?interval=' + tf, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!resp.ok) throw new Error();
+    const result = await resp.json();
+    if (result.error) throw new Error();
+
+    const raw = {
+      prices: result.price_history, highs: result.high_history,
+      lows: result.low_history, opens: result.open_history,
+      vols: result.volume_history, timestamps: result.timestamps
+    };
+    const recomp = computeIndicators(raw.prices, raw.highs, raw.lows, raw.opens, raw.vols);
+    updateChart(raw, recomp);
+  } catch(e) {
+    // fallback: just reuse last data if available
+    if (lastChartData) updateChart(lastChartData.data, lastChartData.ind);
   }
-  ctx.strokeStyle = 'rgba(0,212,255,0.3)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+}
+
+function drawChart(prices, highs, lows, opens, timestamps, ind) {
+  // Legacy wrapper — routes to TradingView chart
+  updateChart({ prices, highs, lows, opens, timestamps }, ind);
 }
 
 // ─── Update UI ────────────────────────────────────────────────────────────────
@@ -1141,7 +1178,7 @@ async function runAnalysis() {
     };
 
     // Recompute BB arrays from price history for chart
-    const recomp = computeIndicators(raw.prices, raw.highs, raw.lows, raw.opens, raw.vols);
+    const recomp = computeIndicators(raw.prices, raw.highs, raw.lows, raw.vols);
     ind.bbUpperArr = recomp.bbUpperArr;
     ind.bbLowerArr = recomp.bbLowerArr;
     ind.vwapArr = recomp.vwapArr;
@@ -1153,7 +1190,7 @@ async function runAnalysis() {
     document.getElementById('loadingText').textContent = 'Agent offline — using simulation...';
     await new Promise(r => setTimeout(r, 800));
     raw = generateNQData();
-    ind = computeIndicators(raw.prices, raw.highs, raw.lows, raw.opens, raw.vols);
+    ind = computeIndicators(raw.prices, raw.highs, raw.lows, raw.vols);
     document.getElementById('liveStatus').textContent = 'SIMULATED';
   }
 

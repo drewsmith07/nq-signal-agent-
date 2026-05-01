@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import json
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -222,7 +222,10 @@ def send_pushover(signal, price, confidence, score):
 def get_signal():
     global last_signal
     try:
-        df = yf.Ticker(TICKER).history(interval="5m", period="2d")
+        interval = request.args.get("interval", "5m")
+        period_map = {"1m": "1d", "5m": "2d", "1h": "7d"}
+        period = period_map.get(interval, "2d")
+        df = yf.Ticker(TICKER).history(interval=interval, period=period)
         if df.empty:
             return jsonify({"error": "No data returned"}), 500
         result = generate_signal(df)
