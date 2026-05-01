@@ -283,7 +283,7 @@ Write 3-4 sentences in plain English:
 Keep it conversational, no jargon without explanation."""
 
         data = json_mod.dumps({
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-3-5-haiku-20241022",
             "max_tokens": 300,
             "messages": [{"role": "user", "content": prompt}]
         }).encode()
