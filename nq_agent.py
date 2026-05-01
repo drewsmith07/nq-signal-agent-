@@ -237,6 +237,73 @@ def get_signal():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/commentary')
+def get_commentary():
+    try:
+        import os, urllib.request, urllib.parse, json as json_mod
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        if not api_key:
+            return jsonify({"commentary": "API key not configured."})
+
+        # Get current signal data
+        df = yf.Ticker(TICKER).history(interval="5m", period="2d")
+        if df.empty:
+            return jsonify({"commentary": "No market data available."})
+        result = generate_signal(df)
+
+        sig = result["signal"]
+        price = result["price"]
+        conf = result["confidence"]
+        score = result["score"]
+        rsi_val = result["indicators"]["rsi"]
+        macd_hist = result["indicators"]["macd_histogram"]
+        bb_pos = result["indicators"]["bb_position"]
+        vwap_val = result["indicators"]["vwap"]
+        vol_ratio = result["volume"]["ratio"]
+        patterns = result["patterns"]
+        reasons = result["reasons"]
+        support = result["support"]
+        resistance = result["resistance"]
+
+        prompt = f"""You are a trading coach explaining NQ futures signals to someone still learning. Be clear, specific, and educational.
+
+Current Signal: {sig} (confidence: {conf}%, score: {score})
+Price: {price} | VWAP: {vwap_val}
+RSI: {rsi_val} | MACD Histogram: {macd_hist}
+BB Position: {bb_pos*100:.0f}% of band
+Support: {support} | Resistance: {resistance}
+Volume ratio: {vol_ratio}x average
+Patterns detected: {', '.join([p[0] for p in patterns]) if patterns else 'none'}
+Reasons that fired: {'; '.join(reasons)}
+
+Write 3-4 sentences in plain English:
+1. Start with exactly what triggered the {sig} signal
+2. Explain what each key indicator is showing right now in simple terms
+3. Tell me what to watch for next — what would confirm or cancel this signal
+Keep it conversational, no jargon without explanation."""
+
+        data = json_mod.dumps({
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}]
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            }
+        )
+        resp = urllib.request.urlopen(req, timeout=15)
+        resp_data = json_mod.loads(resp.read())
+        commentary = resp_data["content"][0]["text"]
+        return jsonify({"commentary": commentary})
+    except Exception as e:
+        return jsonify({"commentary": f"Commentary unavailable: {str(e)}"})
+
 @app.route('/health')
 def health():
     return jsonify({"status": "ok", "ticker": TICKER})
