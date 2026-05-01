@@ -1178,7 +1178,7 @@ async function runAnalysis() {
     };
 
     // Recompute BB arrays from price history for chart
-    const recomp = computeIndicators(raw.prices, raw.highs, raw.lows, raw.vols);
+    const recomp = computeIndicators(raw.prices, raw.highs, raw.lows, raw.opens, raw.vols);
     ind.bbUpperArr = recomp.bbUpperArr;
     ind.bbLowerArr = recomp.bbLowerArr;
     ind.vwapArr = recomp.vwapArr;
@@ -1190,7 +1190,7 @@ async function runAnalysis() {
     document.getElementById('loadingText').textContent = 'Agent offline — using simulation...';
     await new Promise(r => setTimeout(r, 800));
     raw = generateNQData();
-    ind = computeIndicators(raw.prices, raw.highs, raw.lows, raw.vols);
+    ind = computeIndicators(raw.prices, raw.highs, raw.lows, raw.opens, raw.vols);
     document.getElementById('liveStatus').textContent = 'SIMULATED';
   }
 
@@ -1209,8 +1209,7 @@ window.addEventListener('load', () => {
 
 window.addEventListener('resize', () => {
   // Redraw chart on resize
-  const canvas = document.getElementById('priceChart');
-  if (canvas.dataset.hasData) drawChart();
+  // chart resize handled by TradingView
 });
 </script>
 </body>
