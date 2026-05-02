@@ -89,7 +89,8 @@ def support_resistance(df, lookback=20):
 
 # ─── Signal Engine ────────────────────────────────────────────────────────────
 
-def generate_signal(df):
+def score_timeframe(df, weight=1.0):
+    """Score a single timeframe. Returns (score, reasons, indicators dict)."""
     close = df['Close']
     rsi_val = rsi(close).iloc[-1]
     macd_line, sig_line, histogram = macd(close)
@@ -101,7 +102,6 @@ def generate_signal(df):
 
     scores, reasons = [], []
 
-    # Optimized weights from backtester (74.2% win rate on 6mo data)
     W_RSI, W_MACD, W_BB, W_VWAP, W_VOL = 1.0, 1.5, 0.5, 1.5, 0.5
 
     # RSI
@@ -123,7 +123,7 @@ def generate_signal(df):
     bb_range = bb_upper.iloc[-1] - bb_lower.iloc[-1]
     bb_pos = (current_price - bb_lower.iloc[-1]) / bb_range if bb_range > 0 else 0.5
     if bb_pos < 0.1:    scores.append(0.7);  reasons.append("Price at lower Bollinger Band")
-    elif bb_pos > 0.9:  scores.append(-0.7); reasons.append("Price at upper Bollinger Band")
+    elif bb_pos > 0.9:  scores.append(0.0);  reasons.append("Price at upper Bollinger Band")
     else:               scores.append((bb_pos - 0.5) * -0.4); reasons.append(f"BB position {bb_pos:.0%}")
 
     # VWAP
@@ -146,46 +146,133 @@ def generate_signal(df):
         scores.append(boost)
         reasons.append(f"Volume spike ({vol_ratio:.1f}x avg)")
 
-    final_score = float(np.mean(scores)) if scores else 0.0
+    tf_score = float(np.mean(scores)) if scores else 0.0
+
+    indicators = {
+        "rsi": round(float(rsi_val), 2),
+        "macd_histogram": round(float(hist_now), 4),
+        "macd_line": round(float(macd_line.iloc[-1]), 4),
+        "signal_line": round(float(sig_line.iloc[-1]), 4),
+        "bb_upper": round(float(bb_upper.iloc[-1]), 2),
+        "bb_lower": round(float(bb_lower.iloc[-1]), 2),
+        "bb_mid": round(float(bb_mid.iloc[-1]), 2),
+        "bb_position": round(float(bb_pos), 3),
+        "vwap": round(float(vwap_val), 2),
+        "atr": round(float(atr_val), 2),
+        "vol_ratio": round(float(vol_ratio), 2),
+    }
+
+    return tf_score, reasons, indicators
+
+
+def generate_signal(df_1m, df_5m=None, df_1h=None):
+    """
+    Multi-timeframe signal engine.
+    - 1h  (weight 0.5): trend direction — must agree or signal is blocked
+    - 5m  (weight 0.35): primary entry timing
+    - 1m  (weight 0.15): fine-tune / confirmation
+    """
+    # Use whichever timeframes are available
+    df_primary = df_5m if df_5m is not None else df_1m
+
+    current_price = df_primary['Close'].iloc[-1]
+    prev_price    = df_primary['Close'].iloc[-2]
+
+    # ── Score each timeframe ──────────────────────────────────────────────────
+    score_1m, reasons_1m, ind_1m = score_timeframe(df_1m)
+    score_5m, reasons_5m, ind_5m = score_timeframe(df_5m) if df_5m is not None else (score_1m, reasons_1m, ind_1m)
+    score_1h, reasons_1h, ind_1h = score_timeframe(df_1h) if df_1h is not None else (0.0, [], {})
+
+    # ── 1h trend filter ───────────────────────────────────────────────────────
+    # If 1h data exists and strongly disagrees, block the signal
+    trend_bias = 0.0
+    trend_reason = ""
+    if df_1h is not None:
+        if score_1h > 0.2:
+            trend_bias = 0.15
+            trend_reason = f"1h trend BULLISH (score {score_1h:.2f})"
+        elif score_1h < -0.2:
+            trend_bias = -0.15
+            trend_reason = f"1h trend BEARISH (score {score_1h:.2f})"
+        else:
+            trend_reason = f"1h trend NEUTRAL (score {score_1h:.2f})"
+
+    # ── Weighted composite score ──────────────────────────────────────────────
+    # 1h=50%, 5m=35%, 1m=15%
+    if df_1h is not None and df_5m is not None:
+        final_score = (score_1h * 0.50) + (score_5m * 0.35) + (score_1m * 0.15)
+    elif df_5m is not None:
+        final_score = (score_5m * 0.70) + (score_1m * 0.30)
+    else:
+        final_score = score_1m
+
+    # ── Alignment bonus: all three timeframes agree → boost confidence ────────
+    all_bullish = score_1h > 0.15 and score_5m > 0.15 and score_1m > 0.15
+    all_bearish = score_1h < -0.15 and score_5m < -0.15 and score_1m < -0.15
+    alignment_bonus = 0.0
+    if all_bullish:
+        alignment_bonus = 0.10
+    elif all_bearish:
+        alignment_bonus = -0.10
+    final_score += alignment_bonus
+
+    # ── Raise threshold for higher quality signals ────────────────────────────
+    # 0.45 instead of 0.35 = fewer but higher quality signals
+    signal = "BUY" if final_score > 0.45 else "SELL" if final_score < -0.45 else "HOLD"
+
     confidence = min(abs(final_score) * 100, 95)
 
-    signal = "BUY" if final_score > 0.35 else "SELL" if final_score < -0.35 else "HOLD"
-    support, resistance = support_resistance(df)
+    # ── Build combined reasons list ───────────────────────────────────────────
+    reasons = []
+    if trend_reason:
+        reasons.append(trend_reason)
+    if alignment_bonus != 0:
+        reasons.append(f"All timeframes aligned ({'bullish' if alignment_bonus > 0 else 'bearish'}) +bonus")
+    reasons += [f"[5m] {r}" for r in reasons_5m]
+    reasons += [f"[1m] {r}" for r in reasons_1m]
+    reasons += [f"[1h] {r}" for r in reasons_1h]
+
+    # Use 5m for support/resistance and chart data
+    support, resistance = support_resistance(df_primary)
+
+    # Volume from primary timeframe
+    avg_vol = df_primary['Volume'].rolling(20).mean().iloc[-1]
+    vol_ratio = df_primary['Volume'].iloc[-1] / avg_vol if avg_vol > 0 else 1.0
+
+    # Use 5m indicators for display
+    ind = ind_5m if df_5m is not None else ind_1m
+
+    close_primary = df_primary['Close']
 
     return {
         "signal": signal,
         "score": round(final_score, 3),
         "confidence": round(confidence, 1),
         "price": round(float(current_price), 2),
-        "timestamp": df.index[-1].isoformat(),
-        "indicators": {
-            "rsi": round(float(rsi_val), 2),
-            "macd_histogram": round(float(hist_now), 4),
-            "macd_line": round(float(macd_line.iloc[-1]), 4),
-            "signal_line": round(float(sig_line.iloc[-1]), 4),
-            "bb_upper": round(float(bb_upper.iloc[-1]), 2),
-            "bb_lower": round(float(bb_lower.iloc[-1]), 2),
-            "bb_mid": round(float(bb_mid.iloc[-1]), 2),
-            "bb_position": round(float(bb_pos), 3),
-            "vwap": round(float(vwap_val), 2),
-            "atr": round(float(atr_val), 2),
+        "timestamp": df_primary.index[-1].isoformat(),
+        "indicators": ind,
+        "timeframe_scores": {
+            "1m": round(score_1m, 3),
+            "5m": round(score_5m, 3),
+            "1h": round(score_1h, 3),
+            "alignment_bonus": round(alignment_bonus, 3),
         },
         "volume": {
-            "current": int(df['Volume'].iloc[-1]),
+            "current": int(df_primary['Volume'].iloc[-1]),
             "average": int(avg_vol),
             "ratio": round(float(vol_ratio), 2),
             "spike": bool(vol_ratio > 1.5)
         },
-        "patterns": [(p[0], p[1]) for p in detect_patterns(df)],
+        "patterns": [(p[0], p[1]) for p in detect_patterns(df_primary)],
         "support": round(float(support), 2),
         "resistance": round(float(resistance), 2),
         "reasons": reasons,
-        "price_history": [round(float(x), 2) for x in close.tail(60).tolist()],
-        "high_history": [round(float(x), 2) for x in df['High'].tail(60).tolist()],
-        "low_history": [round(float(x), 2) for x in df['Low'].tail(60).tolist()],
-        "open_history": [round(float(x), 2) for x in df['Open'].tail(60).tolist()],
-        "volume_history": [int(x) for x in df['Volume'].tail(60).tolist()],
-        "timestamps": [t.isoformat() for t in df.index[-60:]]
+        "price_history": [round(float(x), 2) for x in close_primary.tail(60).tolist()],
+        "high_history": [round(float(x), 2) for x in df_primary['High'].tail(60).tolist()],
+        "low_history": [round(float(x), 2) for x in df_primary['Low'].tail(60).tolist()],
+        "open_history": [round(float(x), 2) for x in df_primary['Open'].tail(60).tolist()],
+        "volume_history": [int(x) for x in df_primary['Volume'].tail(60).tolist()],
+        "timestamps": [t.isoformat() for t in df_primary.index[-60:]]
     }
 
 @app.route('/')
@@ -222,13 +309,19 @@ def send_pushover(signal, price, confidence, score):
 def get_signal():
     global last_signal
     try:
-        interval = request.args.get("interval", "5m")
-        period_map = {"1m": "1d", "5m": "2d", "1h": "7d"}
-        period = period_map.get(interval, "2d")
-        df = yf.Ticker(TICKER).history(interval=interval, period=period)
-        if df.empty:
+        ticker = yf.Ticker(TICKER)
+        # Always fetch all three timeframes
+        df_1m = ticker.history(interval="1m", period="1d")
+        df_5m = ticker.history(interval="5m", period="2d")
+        df_1h = ticker.history(interval="1h", period="7d")
+
+        if df_5m.empty and df_1m.empty:
             return jsonify({"error": "No data returned"}), 500
-        result = generate_signal(df)
+
+        df_1m  = df_1m  if not df_1m.empty  else None
+        df_5m  = df_5m  if not df_5m.empty  else None
+        df_1h  = df_1h  if not df_1h.empty  else None
+        result = generate_signal(df_1m, df_5m, df_1h)
         new_sig = result["signal"]
         if new_sig != last_signal["signal"] and new_sig in ("BUY", "SELL"):
             send_pushover(new_sig, result["price"], result["confidence"], result["score"])
@@ -246,10 +339,16 @@ def get_commentary():
             return jsonify({"commentary": "API key not configured."})
 
         # Get current signal data
-        df = yf.Ticker(TICKER).history(interval="5m", period="2d")
-        if df.empty:
+        ticker = yf.Ticker(TICKER)
+        df_1m = ticker.history(interval="1m", period="1d")
+        df_5m = ticker.history(interval="5m", period="2d")
+        df_1h = ticker.history(interval="1h", period="7d")
+        if df_5m.empty and df_1m.empty:
             return jsonify({"commentary": "No market data available."})
-        result = generate_signal(df)
+        df_1m = df_1m if not df_1m.empty else None
+        df_5m = df_5m if not df_5m.empty else None
+        df_1h = df_1h if not df_1h.empty else None
+        result = generate_signal(df_1m, df_5m, df_1h)
 
         sig = result["signal"]
         price = result["price"]
