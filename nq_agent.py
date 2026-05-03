@@ -318,8 +318,8 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
 
     support, resistance = support_resistance(df_5m)
 
-    TP_POINTS = 20
-    SL_POINTS = 15
+    TP_POINTS = 60
+    SL_POINTS = 20
     if signal == 'BUY':
         tp_price = round(current_price + TP_POINTS, 2)
         sl_price = round(current_price - SL_POINTS, 2)
