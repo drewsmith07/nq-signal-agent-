@@ -982,7 +982,7 @@ async function switchTimeframe(tf) {
   // Fetch new data from agent
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     const resp = await fetch('/signal?interval=' + tf, { signal: controller.signal });
     clearTimeout(timeoutId);
     if (!resp.ok) throw new Error();
@@ -1123,7 +1123,7 @@ async function runAnalysis() {
 
   try {
     document.getElementById('loadingText').textContent = 'Fetching live NQ data...';
-    const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 8000); const resp = await fetch('/signal', { signal: controller.signal }); clearTimeout(timeoutId);
+    const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 20000); const resp = await fetch('/signal', { signal: controller.signal }); clearTimeout(timeoutId);
     if (!resp.ok) throw new Error('Agent returned error');
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
