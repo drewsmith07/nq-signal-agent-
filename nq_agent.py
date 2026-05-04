@@ -432,11 +432,46 @@ def get_signal():
             return jsonify({"error": "No data returned"}), 500
         result = generate_signal(df_5m, df_1h, df_1m)
         new_sig = result["signal"]
+
+        # ── Detailed eval log (visible in Railway Deploy Logs) ──────────────
+        import pytz
+        pst = pytz.timezone('US/Pacific')
+        now_pst = datetime.now(pst).strftime('%m/%d %H:%M PST')
+        ind = result["indicators"]
+        vol = result["volume"]
+        session = result["session"].upper()
+        score = result["score"]
+        conf = result["confidence"]
+        price = result["price"]
+        rsi_v = ind["rsi"]
+        macd_h = ind["macd_histogram"]
+        bb_pct = ind["bb_position"] * 100
+        vwap_v = ind["vwap"]
+        vol_r = vol["ratio"]
+        event_flag = " ⚠️ EVENT-WINDOW" if result.get("event_window") else ""
+        signal_icon = "🟢 BUY" if new_sig == "BUY" else "🔴 SELL" if new_sig == "SELL" else "⚪ HOLD"
+
+        print(
+            f"[{now_pst}] {signal_icon}{event_flag} | "
+            f"Price: {price} | Score: {score:+.3f} | Conf: {conf:.0f}% | "
+            f"Session: {session} | "
+            f"RSI: {rsi_v:.1f} | MACD_H: {macd_h:+.4f} | "
+            f"BB%: {bb_pct:.0f}% | VWAP: {vwap_v} | Vol: {vol_r:.1f}x"
+        )
+
+        # Log near-misses (score within 0.15 of threshold but still HOLD)
+        thr = 0.45 if result["session"] == "london" else 0.38
+        if new_sig == "HOLD" and abs(score) > 0 and abs(score) >= thr * 0.6:
+            gap = thr - abs(score)
+            direction = "BUY" if score > 0 else "SELL"
+            print(f"  ↳ NEAR-MISS: {direction} signal {gap:.3f} pts below threshold ({thr})")
+
         if new_sig != last_signal["signal"] and new_sig in ("BUY", "SELL"):
             send_pushover(new_sig, result["price"], result["confidence"], result["score"], result)
         last_signal = {"signal": new_sig, "price": result["price"]}
         return jsonify(result)
     except Exception as e:
+        print(f"[ERROR] /signal failed: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/commentary')
