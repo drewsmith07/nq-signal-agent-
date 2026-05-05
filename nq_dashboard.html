@@ -286,7 +286,7 @@ header {
 <!-- Chart -->
 <div class="chart-card">
   <div class="chart-header">
-    <div class="chart-ttl">PRICE ACTION · 5M</div>
+    <div class="chart-ttl">PRICE ACTION · <span class="chart-tf-label">5M</span></div>
     <div class="tf-group">
       <button class="tf-btn" id="tf1m" onclick="switchTf('1m')">1m</button>
       <button class="tf-btn active" id="tf5m" onclick="switchTf('5m')">5m</button>
@@ -540,12 +540,15 @@ async function fetchSignal() {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(()=>ctrl.abort(), 20000);
-    const r = await fetch('/signal', {signal: ctrl.signal});
+    const r = await fetch('/signal?tf=' + (currentTf || '5m'), {signal: ctrl.signal});
     clearTimeout(t);
     if (!r.ok) throw new Error();
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     document.getElementById('liveStatus').textContent = 'LIVE';
+    // Update chart label
+    const chartLabel = document.querySelector('.chart-tf-label');
+    if (chartLabel) chartLabel.textContent = (currentTf || '5m').toUpperCase();
     updateUI(d);
   } catch(e) {
     document.getElementById('liveStatus').textContent = 'ERROR';
@@ -576,8 +579,11 @@ function switchTab(name) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
 }
+let currentTf = '5m';
 function switchTf(tf) {
+  currentTf = tf;
   ['1m','5m','1h'].forEach(t => document.getElementById('tf'+t).classList.toggle('active', t===tf));
+  fetchSignal();
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

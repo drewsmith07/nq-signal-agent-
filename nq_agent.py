@@ -394,21 +394,24 @@ def get_signal():
     global last_signal
     try:
         import pytz
-        # ── FIX 1: Force fresh data — new session every call, no cache ───────
-        session = yf.base.requests_cache.CachedSession() if hasattr(yf.base, 'requests_cache') else None
-        ticker_obj = yf.Ticker(TICKER)
-        # Force fresh by using prepost=False and a unique session
-        try:
-            import requests
-            ticker_obj._download_thread = None  # reset any cached thread
-        except: pass
+        tf = request.args.get('tf', '5m')  # 1m, 5m, 1h
+
+        # ── Force fresh data ──────────────────────────────────────────────────
+        if tf == '1m':
+            df_main = yf.download(TICKER, interval="1m", period="1d", auto_adjust=True, progress=False, threads=False)
+        elif tf == '1h':
+            df_main = yf.download(TICKER, interval="1h", period="30d", auto_adjust=True, progress=False, threads=False)
+        else:
+            df_main = yf.download(TICKER, interval="5m", period="2d", auto_adjust=True, progress=False, threads=False)
+
         df_5m = yf.download(TICKER, interval="5m", period="2d", auto_adjust=True, progress=False, threads=False)
         df_1h = yf.download(TICKER, interval="1h", period="60d", auto_adjust=True, progress=False, threads=False)
         df_1m = yf.download(TICKER, interval="1m", period="1d", auto_adjust=True, progress=False, threads=False)
+
         # Flatten MultiIndex columns if present
-        for df in [df_5m, df_1h, df_1m]:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+        for _df in [df_main, df_5m, df_1h, df_1m]:
+            if isinstance(_df.columns, pd.MultiIndex):
+                _df.columns = _df.columns.get_level_values(0)
 
         if df_5m.empty:
             return jsonify({"error": "No data returned"}), 500
@@ -416,6 +419,15 @@ def get_signal():
         result = generate_signal(df_5m, df_1h, df_1m)
         new_sig = result["signal"]
         new_ts  = result["timestamp"]
+
+        # Override chart history with selected timeframe
+        if not df_main.empty:
+            result['price_history'] = [round(float(x), 2) for x in df_main['Close'].tail(60).tolist()]
+            result['high_history']   = [round(float(x), 2) for x in df_main['High'].tail(60).tolist()]
+            result['low_history']    = [round(float(x), 2) for x in df_main['Low'].tail(60).tolist()]
+            result['open_history']   = [round(float(x), 2) for x in df_main['Open'].tail(60).tolist()]
+            result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
+            result['chart_tf']       = tf
 
         # ── FIX 2: 30-min cooldown — block repeat signals same direction ──────
         cooldown_triggered = False
