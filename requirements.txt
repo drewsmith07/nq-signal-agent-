@@ -1,5 +1,6 @@
-yfinance
 flask
 flask-cors
 pandas
 numpy
+requests
+pytz

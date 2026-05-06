@@ -1,24 +1,73 @@
 #!/usr/bin/env python3
 """
-NQ Futures Scalping Signal Agent - v2.1
-Fixes applied to verified 84.6% WR baseline:
-1. Stale data fix — cache bypass on yfinance calls
-2. 30-min cooldown — no repeat signals in same direction within 6 candles
-Core engine unchanged from verified baseline.
+NQ Futures Scalping Signal Agent - v3.0
+Real-time data via ProjectX/TopstepX API — zero lag
 """
 
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import json
-from datetime import datetime
+import requests
+from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-TICKER = "NQ=F"
+# ─── ProjectX Config ──────────────────────────────────────────────────────────
+PX_USERNAME = 'drewksmith602@gmail.com'
+PX_API_KEY  = 'BdrBl456O5VAW5N1GdSyd3QjeC7eOilcpizEeZ6+5eg='
+PX_BASE_URL = 'https://api.topstepx.com/api'
+NQ_CONTRACT = 'CON.F.US.ENQ.M26'  # Front month NQ — update on rollover
+
+_px_token = None
+_px_token_expiry = None
+
+def get_px_token():
+    global _px_token, _px_token_expiry
+    now = datetime.now(timezone.utc)
+    if _px_token and _px_token_expiry and now < _px_token_expiry:
+        return _px_token
+    r = requests.post(f'{PX_BASE_URL}/Auth/loginKey',
+        headers={'Content-Type': 'application/json'},
+        json={'userName': PX_USERNAME, 'apiKey': PX_API_KEY},
+        timeout=10)
+    data = r.json()
+    if not data.get('success'):
+        raise Exception(f"ProjectX auth failed: {data}")
+    _px_token = data['token']
+    _px_token_expiry = now + timedelta(hours=23)
+    print(f"[ProjectX] Authenticated successfully")
+    return _px_token
+
+def get_nq_bars(interval_minutes=5, lookback_days=2, limit=300):
+    """Fetch real-time NQ bars from ProjectX — zero lag"""
+    token = get_px_token()
+    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    start = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    end = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    r = requests.post(f'{PX_BASE_URL}/History/retrieveBars', headers=headers,
+        json={
+            'contractId': NQ_CONTRACT,
+            'live': False,
+            'startTime': start,
+            'endTime': end,
+            'unit': 2,  # minute
+            'unitNumber': interval_minutes,
+            'limit': limit,
+            'includePartialBar': False
+        }, timeout=15)
+    data = r.json()
+    bars = data.get('bars', [])
+    if not bars:
+        raise Exception(f"No bars returned from ProjectX: {data}")
+    df = pd.DataFrame(bars)
+    df.rename(columns={'t':'Datetime','o':'Open','h':'High','l':'Low','c':'Close','v':'Volume'}, inplace=True)
+    df['Datetime'] = pd.to_datetime(df['Datetime'], utc=True)
+    df = df.sort_values('Datetime').reset_index(drop=True)
+    df.set_index('Datetime', inplace=True)
+    return df
 
 # ─── Economic Calendar ────────────────────────────────────────────────────────
 ECONOMIC_CALENDAR = [
@@ -55,14 +104,14 @@ def _is_event_window(dt):
     except:
         return False
 
-# ─── Indicators (identical to verified baseline) ──────────────────────────────
+# ─── Indicators ───────────────────────────────────────────────────────────────
 
 def rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
-    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    avg_gain = gain.ewm(com=period-1, min_periods=period).mean()
+    avg_loss = loss.ewm(com=period-1, min_periods=period).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
@@ -71,13 +120,12 @@ def macd(series, fast=12, slow=26, signal=9):
     ema_slow = series.ewm(span=slow).mean()
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+    return macd_line, signal_line, macd_line - signal_line
 
-def bollinger_bands(series, period=20, std_dev=2):
+def bollinger_bands(series, period=20):
     sma = series.rolling(period).mean()
     std = series.rolling(period).std()
-    return sma + std_dev * std, sma, sma - std_dev * std
+    return sma + 2*std, sma, sma - 2*std
 
 def vwap(df):
     tp = (df['High'] + df['Low'] + df['Close']) / 3
@@ -88,7 +136,7 @@ def atr(df, period=14):
     hc = (df['High'] - df['Close'].shift()).abs()
     lc = (df['Low'] - df['Close'].shift()).abs()
     tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return tr.ewm(com=period - 1, min_periods=period).mean()
+    return tr.ewm(com=period-1, min_periods=period).mean()
 
 def support_resistance(df, lookback=20):
     highs = df['High'].rolling(5, center=True).max()
@@ -96,8 +144,6 @@ def support_resistance(df, lookback=20):
     resistance = df['High'][df['High'] == highs].tail(lookback).mean()
     support = df['Low'][df['Low'] == lows].tail(lookback).mean()
     return support, resistance
-
-# ─── Price Action ─────────────────────────────────────────────────────────────
 
 def _rsi_divergence(df, i, rsi_s, lookback=10):
     if i < lookback: return 0
@@ -123,7 +169,7 @@ def _detect_fvg(df, i, lookback=15):
     for j in range(max(2, i-lookback), i+1):
         if j >= len(df): break
         h2 = df['High'].iloc[j-2]; l2 = df['Low'].iloc[j-2]
-        h0 = df['High'].iloc[j];   l0 = df['Low'].iloc[j]
+        h0 = df['High'].iloc[j]; l0 = df['Low'].iloc[j]
         if h2 < l0:
             sz = l0-h2; in_fvg = h2<=cp<=l0; st = min(sz/10.0,1.0)
             if st > best_st: best_type='bullish'; best_in=in_fvg; best_st=st
@@ -133,7 +179,7 @@ def _detect_fvg(df, i, lookback=15):
     return best_type, best_in, best_st
 
 def _detect_ob(df, i, lookback=20):
-    if i < lookback + 3: return 0, 0.0
+    if i < lookback+3: return 0, 0.0
     cp = df['Close'].iloc[i]
     for j in range(i-2, max(i-lookback, 3), -1):
         if all(df['Close'].iloc[j-k] > df['Open'].iloc[j-k] for k in range(3)):
@@ -148,18 +194,13 @@ def _get_window(timestamp):
     import pytz
     PST = pytz.timezone('US/Pacific')
     try:
-        if timestamp.tzinfo is None:
-            ts = timestamp.tz_localize('UTC').tz_convert(PST)
-        else:
-            ts = timestamp.tz_convert(PST)
+        ts = timestamp.tz_convert(PST) if timestamp.tzinfo else timestamp.tz_localize('UTC').tz_convert(PST)
         t = ts.hour * 60 + ts.minute
         if 2*60 <= t < 4*60:           return 'london'
         elif 6*60+30 <= t <= 10*60+30: return 'us'
         return None
     except:
         return None
-
-# ─── Score function (identical to verified baseline) ──────────────────────────
 
 def _score_tf(df, i):
     close = df['Close']
@@ -183,7 +224,7 @@ def _score_tf(df, i):
     elif h > 0:              scores.append(0.4 * W_MACD)
     else:                    scores.append(-0.4 * W_MACD)
     bb_range = bb_upper_s.iloc[i] - bb_lower_s.iloc[i]
-    bp = (df['Close'].iloc[i] - bb_lower_s.iloc[i]) / bb_range if bb_range > 0 else 0.5
+    bp = (close.iloc[i] - bb_lower_s.iloc[i]) / bb_range if bb_range > 0 else 0.5
     if bp < 0.1:   scores.append(0.7)
     elif bp > 0.9: scores.append(0.0)
     else:          scores.append((bp - 0.5) * -0.4)
@@ -211,16 +252,17 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     vwap_val = vwap(df_5m).iloc[-1]
     atr_val = atr(df_5m).iloc[-1]
     avg_vol = df_5m['Volume'].rolling(20).mean().iloc[-1]
-    vol_ratio = df_5m['Volume'].iloc[-1] / avg_vol if avg_vol > 0 else 1.0
+    vol_ratio_val = df_5m['Volume'].iloc[-1] / avg_vol if avg_vol > 0 else 1.0
 
+    # Use REAL current time for session — not data timestamp
+    real_now = pd.Timestamp.now(tz='UTC')
+    window = _get_window(real_now)
     ct = df_5m.index[-1]
-    window = _get_window(ct)
+    in_event_window = _is_event_window(real_now)
+
     thr = 0.45 if window == 'london' else 0.38
     xwin = 3 if window == 'london' else 5
 
-    in_event_window = _is_event_window(ct)
-
-    # MACD crossover check
     crossed_bull = any(
         histogram.iloc[-(k+1)] > 0 and histogram.iloc[-(k+2)] <= 0
         for k in range(xwin) if i-k-1 >= 0
@@ -230,7 +272,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         for k in range(xwin) if i-k-1 >= 0
     )
 
-    # Score timeframes
     s5 = _score_tf(df_5m, i)
     s1h = 0.0
     if df_1h is not None and len(df_1h) >= 30:
@@ -240,7 +281,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         s1m = _score_tf(df_1m, len(df_1m)-1)
 
     final = (s1h * 0.50) + (s5 * 0.35) + (s1m * 0.15)
-
     if s1h > 0.15 and s5 > 0.15 and s1m > 0.15:     final += 0.10
     elif s1h < -0.15 and s5 < -0.15 and s1m < -0.15: final -= 0.10
 
@@ -263,8 +303,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     if ob_dir ==  1: final += 0.10 * ob_st
     if ob_dir == -1: final -= 0.10 * ob_st
 
-    # ─── Signal Decision ──────────────────────────────────────────────────────
-    # Original gate preserved — crossover required
     if not (crossed_bull or crossed_bear) or window is None or in_event_window:
         signal = "HOLD"
         final = 0.0
@@ -287,17 +325,9 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     reasons.append(f"Score: {final:.3f} (thr {thr})")
 
     support, resistance = support_resistance(df_5m)
-
-    TP_POINTS = 60
-    SL_POINTS = 20
-    if signal == 'BUY':
-        tp_price = round(current_price + TP_POINTS, 2)
-        sl_price = round(current_price - SL_POINTS, 2)
-    elif signal == 'SELL':
-        tp_price = round(current_price - TP_POINTS, 2)
-        sl_price = round(current_price + SL_POINTS, 2)
-    else:
-        tp_price = None; sl_price = None
+    TP_POINTS = 60; SL_POINTS = 20
+    tp_price = round(current_price + TP_POINTS, 2) if signal == 'BUY' else round(current_price - TP_POINTS, 2) if signal == 'SELL' else None
+    sl_price = round(current_price - SL_POINTS, 2) if signal == 'BUY' else round(current_price + SL_POINTS, 2) if signal == 'SELL' else None
 
     hist_now = float(histogram.iloc[-1])
     bb_range = float(bb_upper.iloc[-1] - bb_lower.iloc[-1])
@@ -330,8 +360,8 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         "volume": {
             "current": int(df_5m['Volume'].iloc[-1]),
             "average": int(avg_vol),
-            "ratio": round(float(vol_ratio), 2),
-            "spike": bool(vol_ratio > 1.5)
+            "ratio": round(float(vol_ratio_val), 2),
+            "spike": bool(vol_ratio_val > 1.5)
         },
         "patterns": [],
         "support": round(float(support), 2),
@@ -368,13 +398,9 @@ def send_pushover(signal, price, confidence, score, result=None):
         import urllib.request, urllib.parse
         tp = result.get('tp_price'); sl = result.get('sl_price')
         sc = abs(score)
-        if sc >= 0.55:   size_label = '3 contracts (HIGH conviction)'
-        elif sc >= 0.45: size_label = '2 contracts (SOLID conviction)'
-        else:            size_label = '1 contract (standard)'
-        tp_sl = (f' | TP: {tp} SL: {sl}') if tp else ''
-        message = (signal + ' - NQ at ' + str(round(price, 2)) +
-                   ' | Score: ' + str(round(score, 3)) +
-                   ' | Size: ' + size_label + tp_sl)
+        size_label = '3 contracts (HIGH conviction)' if sc >= 0.55 else '2 contracts (SOLID conviction)' if sc >= 0.45 else '1 contract (standard)'
+        tp_sl = f' | TP: {tp} SL: {sl}' if tp else ''
+        message = f"{signal} - NQ at {round(price, 2)} | Score: {round(score, 3)} | Size: {size_label}{tp_sl}"
         data = urllib.parse.urlencode({
             "token": PUSHOVER_TOKEN, "user": PUSHOVER_USER,
             "title": f"NQ Signal: {signal}", "message": message,
@@ -382,9 +408,7 @@ def send_pushover(signal, price, confidence, score, result=None):
             "sound": "cashregister" if signal == "BUY" else "siren" if signal == "SELL" else "none"
         }).encode()
         urllib.request.urlopen(
-            urllib.request.Request("https://api.pushover.net/1/messages.json", data=data),
-            timeout=5
-        )
+            urllib.request.Request("https://api.pushover.net/1/messages.json", data=data), timeout=5)
         print(f"📱 Pushover sent: {signal} @ {price}")
     except Exception as e:
         print(f"Pushover error: {e}")
@@ -394,24 +418,19 @@ def get_signal():
     global last_signal
     try:
         import pytz
-        tf = request.args.get('tf', '5m')  # 1m, 5m, 1h
+        tf = request.args.get('tf', '5m')
 
-        # ── Force fresh data ──────────────────────────────────────────────────
+        # Fetch real-time data from ProjectX
         if tf == '1m':
-            df_main = yf.download(TICKER, interval="1m", period="1d", auto_adjust=True, progress=False, threads=False)
+            df_main = get_nq_bars(interval_minutes=1, lookback_days=1, limit=300)
         elif tf == '1h':
-            df_main = yf.download(TICKER, interval="1h", period="30d", auto_adjust=True, progress=False, threads=False)
+            df_main = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
         else:
-            df_main = yf.download(TICKER, interval="5m", period="2d", auto_adjust=True, progress=False, threads=False)
+            df_main = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
 
-        df_5m = yf.download(TICKER, interval="5m", period="2d", auto_adjust=True, progress=False, threads=False)
-        df_1h = yf.download(TICKER, interval="1h", period="60d", auto_adjust=True, progress=False, threads=False)
-        df_1m = yf.download(TICKER, interval="1m", period="1d", auto_adjust=True, progress=False, threads=False)
-
-        # Flatten MultiIndex columns if present
-        for _df in [df_main, df_5m, df_1h, df_1m]:
-            if isinstance(_df.columns, pd.MultiIndex):
-                _df.columns = _df.columns.get_level_values(0)
+        df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
+        df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+        df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
 
         if df_5m.empty:
             return jsonify({"error": "No data returned"}), 500
@@ -420,39 +439,15 @@ def get_signal():
         new_sig = result["signal"]
         new_ts  = result["timestamp"]
 
-        # Override chart history with selected timeframe
-        if not df_main.empty:
-            result['price_history'] = [round(float(x), 2) for x in df_main['Close'].tail(60).tolist()]
-            result['high_history']   = [round(float(x), 2) for x in df_main['High'].tail(60).tolist()]
-            result['low_history']    = [round(float(x), 2) for x in df_main['Low'].tail(60).tolist()]
-            result['open_history']   = [round(float(x), 2) for x in df_main['Open'].tail(60).tolist()]
-            result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
-            result['chart_tf']       = tf
+        # Override chart with selected TF
+        result['price_history'] = [round(float(x), 2) for x in df_main['Close'].tail(60).tolist()]
+        result['high_history']   = [round(float(x), 2) for x in df_main['High'].tail(60).tolist()]
+        result['low_history']    = [round(float(x), 2) for x in df_main['Low'].tail(60).tolist()]
+        result['open_history']   = [round(float(x), 2) for x in df_main['Open'].tail(60).tolist()]
+        result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
+        result['chart_tf']       = tf
 
-        # ── FIX 2: 30-min cooldown — block repeat signals same direction ──────
-        cooldown_triggered = False
-        if new_sig in ("BUY", "SELL") and new_sig == last_signal["signal"]:
-            last_ts = last_signal.get("timestamp")
-            if last_ts:
-                try:
-                    from datetime import timezone
-                    last_dt = pd.Timestamp(last_ts)
-                    curr_dt = df_5m.index[-1]
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.tz_localize('UTC')
-                    if curr_dt.tzinfo is None:
-                        curr_dt = curr_dt.tz_localize('UTC')
-                    mins_since = (curr_dt - last_dt).total_seconds() / 60
-                    if mins_since < 30:
-                        cooldown_triggered = True
-                        new_sig = "HOLD"
-                        result["signal"] = "HOLD"
-                        result["score"] = 0.0
-                        result["confidence"] = 0.0
-                except:
-                    pass
-
-        # ── Deploy log ────────────────────────────────────────────────────────
+        # Deploy log
         pst = pytz.timezone('US/Pacific')
         now_pst = datetime.now(pst).strftime('%m/%d %H:%M PST')
         try:
@@ -460,19 +455,10 @@ def get_signal():
         except:
             data_ts = "?"
         ind = result["indicators"]
-        score = result["score"]
-        conf = result["confidence"]
-        price = result["price"]
+        score = result["score"]; conf = result["confidence"]; price = result["price"]
         signal_icon = "🟢 BUY" if new_sig == "BUY" else "🔴 SELL" if new_sig == "SELL" else "⚪ HOLD"
         event_flag = " ⚠️ EVENT" if result.get("event_window") else ""
-        cooldown_flag = " ⏱️ COOLDOWN" if cooldown_triggered else ""
-
-        print(
-            f"[{now_pst}] {signal_icon}{event_flag}{cooldown_flag} | "
-            f"Price: {price} | DataTS: {data_ts} | Score: {score:+.3f} | Conf: {conf:.0f}% | "
-            f"RSI: {ind['rsi']:.1f} | MACD_H: {ind['macd_histogram']:+.4f} | "
-            f"BB%: {ind['bb_position']*100:.0f}% | VWAP: {ind['vwap']} | Vol: {result['volume']['ratio']:.1f}x"
-        )
+        print(f"[{now_pst}] {signal_icon}{event_flag} | Price: {price} | DataTS: {data_ts} | Score: {score:+.3f} | Conf: {conf:.0f}% | Session: {result['session'].upper()} | RSI: {ind['rsi']:.1f} | MACD_H: {ind['macd_histogram']:+.4f} | BB%: {ind['bb_position']*100:.0f}% | Vol: {result['volume']['ratio']:.1f}x")
 
         thr = 0.45 if result["session"] == "london" else 0.38
         if new_sig == "HOLD" and abs(score) > 0 and abs(score) >= thr * 0.6:
@@ -480,7 +466,7 @@ def get_signal():
             direction = "BUY" if score > 0 else "SELL"
             print(f"  ↳ NEAR-MISS: {direction} signal {gap:.3f} pts below threshold ({thr})")
 
-        if new_sig in ("BUY", "SELL") and not cooldown_triggered:
+        if new_sig in ("BUY", "SELL") and new_sig != last_signal["signal"]:
             send_pushover(new_sig, result["price"], result["confidence"], result["score"], result)
             last_signal = {"signal": new_sig, "price": result["price"], "timestamp": new_ts}
 
@@ -496,51 +482,31 @@ def get_commentary():
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             return jsonify({"commentary": "API key not configured."})
-        df_5m = yf.download(TICKER, interval="5m", period="2d", auto_adjust=True, progress=False, threads=False)
-        df_1h = yf.download(TICKER, interval="1h", period="60d", auto_adjust=True, progress=False, threads=False)
-        df_1m = yf.download(TICKER, interval="1m", period="1d", auto_adjust=True, progress=False, threads=False)
-        for _df in [df_5m, df_1h, df_1m]:
-            if isinstance(_df.columns, pd.MultiIndex):
-                _df.columns = _df.columns.get_level_values(0)
-        if df_5m.empty:
-            return jsonify({"commentary": "No market data available."})
+        df_5m = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
+        df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+        df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
         result = generate_signal(df_5m, df_1h, df_1m)
         sig = result["signal"]; price = result["price"]; conf = result["confidence"]
         score = result["score"]; ind = result["indicators"]
-        event_warning = " NOTE: Signal suppressed — high-impact event window active." if result.get("event_window") else ""
-        prompt = f"""You are a trading coach explaining NQ futures signals to someone still learning. Be clear, specific, and educational.{event_warning}
-
-Current Signal: {sig} (confidence: {conf}%, score: {score})
-Price: {price} | VWAP: {ind['vwap']}
-RSI: {ind['rsi']} | MACD Histogram: {ind['macd_histogram']}
-BB Position: {ind['bb_position']*100:.0f}%
-Support: {result['support']} | Resistance: {result['resistance']}
-Volume ratio: {result['volume']['ratio']}x average
-Reasons: {'; '.join(result['reasons'])}
-
-Write 3-4 sentences in plain English explaining the signal, what indicators are showing, and what to watch for next."""
-
-        data = json_mod.dumps({
-            "model": "claude-3-5-haiku-20241022",
-            "max_tokens": 300,
-            "messages": [{"role": "user", "content": prompt}]
-        }).encode()
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages", data=data,
-            headers={"Content-Type": "application/json", "x-api-key": api_key,
-                     "anthropic-version": "2023-06-01"}
-        )
+        prompt = f"""You are a trading coach explaining NQ futures signals. Be clear and educational.
+Signal: {sig} (confidence: {conf}%, score: {score})
+Price: {price} | VWAP: {ind['vwap']} | RSI: {ind['rsi']} | MACD: {ind['macd_histogram']}
+BB Position: {ind['bb_position']*100:.0f}% | Support: {result['support']} | Resistance: {result['resistance']}
+Volume: {result['volume']['ratio']}x | Reasons: {'; '.join(result['reasons'])}
+Write 3-4 sentences explaining the signal in plain English."""
+        data = json_mod.dumps({"model": "claude-3-5-haiku-20241022", "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}]}).encode()
+        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=data,
+            headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
         resp = urllib.request.urlopen(req, timeout=15)
-        resp_data = json_mod.loads(resp.read())
-        commentary = resp_data["content"][0]["text"]
-        return jsonify({"commentary": commentary})
+        return jsonify({"commentary": json_mod.loads(resp.read())["content"][0]["text"]})
     except Exception as e:
         return jsonify({"commentary": f"Commentary unavailable: {str(e)}"})
 
 @app.route('/health')
 def health():
-    return jsonify({"status": "ok", "ticker": TICKER, "version": "2.1"})
+    return jsonify({"status": "ok", "version": "3.0", "data_source": "ProjectX/TopstepX"})
 
 if __name__ == "__main__":
-    print("🚀 NQ Signal Agent v2.1 running at http://localhost:5000")
+    print("🚀 NQ Signal Agent v3.0 — Real-time ProjectX data")
     app.run(host="0.0.0.0", port=8080, debug=False)
