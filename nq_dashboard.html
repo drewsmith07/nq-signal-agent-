@@ -348,9 +348,10 @@ header {
 
 <!-- History tab -->
 <div class="tab-pane" id="tab-history">
+  <div style="padding:10px 0 8px;border-bottom:1px solid var(--border);margin-bottom:8px" id="histSummary"></div>
   <div class="panel" style="background:transparent;border:none;padding:0">
     <table class="hist-table">
-      <thead><tr><th>TIME</th><th>SESSION</th><th>SIG</th><th>SCORE</th><th>ENTRY</th><th>TP</th><th>SL</th><th>CTS</th></tr></thead>
+      <thead><tr><th>TIME</th><th>SIG</th><th>ENTRY</th><th>TP</th><th>SL</th><th>CTS</th><th>RESULT</th><th>P&L</th></tr></thead>
       <tbody id="histBody"><tr><td colspan="8" style="color:var(--muted);text-align:center;padding:24px;font-family:var(--mono);font-size:11px">No signals this session yet.</td></tr></tbody>
     </table>
   </div>
@@ -362,7 +363,75 @@ header {
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
 let chart, candles, vwapLine, bbUp, bbLo;
-const history = [];
+// Load history from sessionStorage
+let signalHistory = [];
+try {
+  const saved = sessionStorage.getItem('nq_signal_history');
+  if (saved) signalHistory = JSON.parse(saved);
+} catch(e) { signalHistory = []; }
+
+// P&L summary state
+let totalPnl = 0; let totalWins = 0; let totalLosses = 0;
+
+function saveHistory() {
+  try { sessionStorage.setItem('nq_signal_history', JSON.stringify(signalHistory.slice(0,100))); } catch(e) {}
+}
+
+function renderHistory() {
+  const tbody = document.getElementById('histBody');
+  if (!signalHistory.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:24px;font-family:var(--mono);font-size:11px">No signals this session yet.</td></tr>';
+    return;
+  }
+  // Recalculate totals
+  totalPnl = 0; totalWins = 0; totalLosses = 0;
+  signalHistory.forEach(h => {
+    if (h.result === 'WIN') { totalPnl += h.pnl||0; totalWins++; }
+    else if (h.result === 'LOSS') { totalPnl += h.pnl||0; totalLosses++; }
+  });
+  const wr = totalWins+totalLosses > 0 ? Math.round(totalWins/(totalWins+totalLosses)*100) : 0;
+  const summary = document.getElementById('histSummary');
+  if (summary) {
+    summary.innerHTML = \`<span style="color:var(--muted);font-family:var(--mono);font-size:10px;letter-spacing:1px">
+      TODAY: <span style="color:\${totalPnl>=0?'var(--green)':'var(--red)'}">$\${totalPnl.toLocaleString()}</span> &nbsp;|&nbsp; 
+      WINS: <span style="color:var(--green)">\${totalWins}</span> &nbsp;|&nbsp; 
+      LOSSES: <span style="color:var(--red)">\${totalLosses}</span> &nbsp;|&nbsp; 
+      WR: <span style="color:var(--accent)">\${wr}%</span>
+    </span>\`;
+  }
+  tbody.innerHTML = signalHistory.map(h => {
+    const resultColor = h.result==='WIN' ? 'var(--green)' : h.result==='LOSS' ? 'var(--red)' : 'var(--muted)';
+    const pnlStr = h.pnl != null ? (h.pnl >= 0 ? '+$'+h.pnl.toLocaleString() : '-$'+Math.abs(h.pnl).toLocaleString()) : '—';
+    const pnlColor = h.pnl > 0 ? 'var(--green)' : h.pnl < 0 ? 'var(--red)' : 'var(--muted)';
+    return \`<tr>
+      <td style="font-family:var(--mono);font-size:10px">\${h.time}</td>
+      <td><span class="sig-badge \${h.signal}">\${h.signal}</span></td>
+      <td style="font-family:var(--mono)">\${h.entry?.toLocaleString()||'—'}</td>
+      <td style="color:var(--green);font-family:var(--mono)">\${h.tp?.toLocaleString()||'—'}</td>
+      <td style="color:var(--red);font-family:var(--mono)">\${h.sl?.toLocaleString()||'—'}</td>
+      <td style="color:var(--accent)">\${h.cts||'—'}x</td>
+      <td style="color:\${resultColor};font-family:var(--mono);font-weight:600">\${h.result||'OPEN'}</td>
+      <td style="color:\${pnlColor};font-family:var(--mono);font-weight:600">\${pnlStr}</td>
+    </tr>\`;
+  }).join('');
+}
+
+// Check if open signals have hit TP or SL
+function checkOpenSignals(currentPrice) {
+  let updated = false;
+  signalHistory.forEach(h => {
+    if (h.result !== 'OPEN' && h.result !== undefined && h.result !== null) return;
+    if (!h.tp || !h.sl) return;
+    if (h.signal === 'BUY') {
+      if (currentPrice >= h.tp) { h.result='WIN'; h.pnl=60*20*h.cts; updated=true; }
+      else if (currentPrice <= h.sl) { h.result='LOSS'; h.pnl=-20*20*h.cts; updated=true; }
+    } else if (h.signal === 'SELL') {
+      if (currentPrice <= h.tp) { h.result='WIN'; h.pnl=60*20*h.cts; updated=true; }
+      else if (currentPrice >= h.sl) { h.result='LOSS'; h.pnl=-20*20*h.cts; updated=true; }
+    }
+  });
+  if (updated) { saveHistory(); renderHistory(); }
+}
 
 // ─── Clock + Session ──────────────────────────────────────────────────────────
 function tick() {
@@ -511,22 +580,27 @@ function updateUI(d) {
       <div><div class="cl-name">${c.n}</div><div class="cl-val">${c.v}</div></div>
     </div>`).join('');
 
-  // History
-  if (d.signal!=='HOLD') {
-    history.unshift({time:new Date().toLocaleTimeString(),session:d.session,signal:d.signal,score:d.score,entry:d.price,tp:d.tp_price,sl:d.sl_price,cts:d.contracts});
-    if (history.length>50) history.pop();
-    const tbody = document.getElementById('histBody');
-    tbody.innerHTML = history.map(h=>`<tr>
-      <td>${h.time}</td>
-      <td style="color:var(--muted)">${h.session||'—'}</td>
-      <td><span class="sig-badge ${h.signal}">${h.signal}</span></td>
-      <td style="color:var(--muted)">${h.score}</td>
-      <td>${h.entry?.toLocaleString()||'—'}</td>
-      <td style="color:var(--green)">${h.tp?.toLocaleString()||'—'}</td>
-      <td style="color:var(--red)">${h.sl?.toLocaleString()||'—'}</td>
-      <td style="color:var(--accent)">${h.cts||'—'}x</td>
-    </tr>`).join('');
+  // History — log new signals and check open ones
+  checkOpenSignals(d.price);
+  if (d.signal !== 'HOLD') {
+    const lastSig = signalHistory[0];
+    const isDupe = lastSig && lastSig.signal === d.signal && 
+                   Math.abs((lastSig.entry||0) - d.price) < 5 &&
+                   (Date.now() - (lastSig.ts||0)) < 5*60*1000;
+    if (!isDupe) {
+      signalHistory.unshift({
+        time: new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),
+        ts: Date.now(),
+        signal: d.signal, score: d.score,
+        entry: d.price, tp: d.tp_price, sl: d.sl_price,
+        cts: d.contracts, result: 'OPEN', pnl: null,
+        session: d.session
+      });
+      if (signalHistory.length > 100) signalHistory.pop();
+      saveHistory();
+    }
   }
+  renderHistory();
 
   // Chart
   if (d.price_history) renderChart(d);
