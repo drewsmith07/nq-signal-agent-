@@ -51,10 +51,8 @@ header {
 .logo-sub { font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-top: 1px; }
 .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* PST Clock */
 .pst-time { font-family: var(--mono); font-size: 12px; color: var(--text); }
 
-/* Session pill */
 .session-badge {
   display: flex; align-items: center; gap: 5px;
   padding: 3px 10px; border: 1px solid var(--border);
@@ -66,7 +64,6 @@ header {
 .session-badge.us .session-dot { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(0,255,136,0.4)} 50%{opacity:0.7;box-shadow:0 0 0 4px rgba(0,255,136,0)} }
 
-/* Live badge */
 .live-badge { display: flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 10px; color: var(--green); letter-spacing: 2px; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 1.5s infinite; }
 
@@ -78,10 +75,9 @@ header {
 .refresh-btn:hover { border-color: var(--accent); background: rgba(0,212,255,0.05); }
 .refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Hero grid — mobile first */
+/* Hero */
 .hero { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
 
-/* Price card */
 .price-card { background: var(--panel); border: 1px solid var(--border); padding: 20px 22px; }
 .ticker { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 3px; margin-bottom: 6px; }
 .price-big { font-family: var(--mono); font-size: 48px; color: #fff; letter-spacing: 2px; line-height: 1; }
@@ -90,7 +86,6 @@ header {
 .pm-item label { display: block; font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; margin-bottom: 3px; }
 .pm-item span { font-family: var(--mono); font-size: 14px; }
 
-/* Signal card */
 .signal-card {
   background: var(--panel); border: 1px solid var(--border);
   padding: 24px 22px; display: flex; flex-direction: column; align-items: center;
@@ -119,7 +114,6 @@ header {
 }
 .sig-score { margin-top: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
-/* TP/SL row */
 .tpsl-row {
   display: flex; gap: 20px; margin-top: 14px;
   padding-top: 14px; border-top: 1px solid var(--border); width: 100%;
@@ -132,7 +126,6 @@ header {
 .sl-color { color: var(--red); }
 .cts-color { color: var(--accent); }
 
-/* Event warning */
 .event-warn {
   display: none; width: 100%; margin-top: 10px; padding: 6px 12px;
   border: 1px solid var(--yellow); background: rgba(255,215,0,0.06);
@@ -177,17 +170,14 @@ header {
 .panel { background: var(--panel); border: 1px solid var(--border); padding: 16px 18px; }
 .panel-ttl { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 3px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 
-/* Reasons */
 .reason-item { display: flex; gap: 8px; align-items: flex-start; font-family: var(--mono); font-size: 11px; line-height: 1.5; margin-bottom: 6px; }
 .rdot { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex-shrink: 0; }
 
-/* Levels */
 .level-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .level-row:last-child { border-bottom: none; }
 .level-lbl { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 2px; }
 .level-val { font-family: var(--mono); font-size: 14px; }
 
-/* AI */
 .ai-text { font-size: 13px; line-height: 1.8; color: var(--text); opacity: 0.85; }
 .ai-spin { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
 .spin { width: 14px; height: 14px; border: 1px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp 0.8s linear infinite; }
@@ -203,18 +193,75 @@ header {
 .cl-name { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; }
 .cl-val { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 1px; }
 
+/* ── History Tab ─────────────────────────────────────────────── */
+.hist-filter-bar {
+  display: flex; gap: 6px; margin-bottom: 14px; align-items: center; flex-wrap: wrap;
+}
+.hf-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--muted); font-family: var(--mono); font-size: 10px;
+  letter-spacing: 1px; padding: 5px 14px; cursor: pointer; transition: all 0.2s;
+}
+.hf-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.05); }
+.hf-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+
+.hist-loading {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  display: flex; align-items: center; gap: 8px; padding: 20px 0;
+}
+
+/* Summary stat cards */
+.hist-stats {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 14px;
+}
+.hstat {
+  background: var(--panel); border: 1px solid var(--border);
+  padding: 12px 14px;
+}
+.hstat-label {
+  font-family: var(--mono); font-size: 9px; color: var(--muted);
+  letter-spacing: 2px; margin-bottom: 5px;
+}
+.hstat-val {
+  font-family: var(--mono); font-size: 22px; font-weight: 700;
+}
+.hstat-sub {
+  font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 2px;
+}
+
 /* History table */
 .hist-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
-.hist-table th { font-size: 9px; color: var(--muted); letter-spacing: 2px; text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-.hist-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.hist-table th {
+  font-size: 9px; color: var(--muted); letter-spacing: 2px; text-align: left;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.hist-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .hist-table tr:last-child td { border-bottom: none; }
+.hist-table tr:hover td { background: rgba(0,212,255,0.02); }
+
 .sig-badge { display: inline-block; padding: 1px 7px; font-size: 9px; letter-spacing: 1px; border: 1px solid; }
 .sig-badge.BUY { color: var(--green); border-color: rgba(0,255,136,0.3); background: rgba(0,255,136,0.05); }
 .sig-badge.SELL { color: var(--red); border-color: rgba(255,59,92,0.3); background: rgba(255,59,92,0.05); }
 
+.est-badge {
+  display: inline-block; font-size: 8px; color: var(--muted);
+  border: 1px solid var(--border); padding: 1px 5px; margin-left: 4px;
+  vertical-align: middle; letter-spacing: 1px;
+}
+
+.hist-empty {
+  font-family: var(--mono); font-size: 11px; color: var(--muted);
+  text-align: center; padding: 32px; border: 1px dashed var(--border);
+}
+
+.hist-note {
+  font-family: var(--mono); font-size: 9px; color: var(--muted);
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border);
+  letter-spacing: 1px;
+}
+
 .footer { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; text-align: right; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 
-/* Desktop */
 @media (min-width: 768px) {
   .hero { flex-direction: row; }
   .price-card { flex: 1; }
@@ -223,6 +270,7 @@ header {
   .panels-grid { grid-template-columns: 1fr 1fr 1fr; }
   .checklist { grid-template-columns: repeat(4, 1fr); }
   .price-big { font-size: 52px; }
+  .hist-stats { grid-template-columns: repeat(4, 1fr); }
 }
 </style>
 </head>
@@ -251,7 +299,6 @@ header {
 
 <!-- Hero -->
 <div class="hero">
-  <!-- Price -->
   <div class="price-card">
     <div class="ticker">NQ=F · NASDAQ 100 FUTURES</div>
     <div class="price-big" id="priceBig">—</div>
@@ -266,7 +313,6 @@ header {
     </div>
   </div>
 
-  <!-- Signal -->
   <div class="signal-card" id="signalCard">
     <div class="sig-label">CURRENT SIGNAL</div>
     <div class="sig-value" id="sigVal">HOLD</div>
@@ -308,7 +354,7 @@ header {
 <div class="tabs-bar">
   <button class="tab-btn active" onclick="switchTab('signal')">SIGNAL</button>
   <button class="tab-btn" onclick="switchTab('checklist')">CHECKLIST</button>
-  <button class="tab-btn" onclick="switchTab('history')">HISTORY</button>
+  <button class="tab-btn" onclick="switchTab('history')" id="histTabBtn">HISTORY</button>
 </div>
 
 <!-- Signal tab -->
@@ -348,12 +394,63 @@ header {
 
 <!-- History tab -->
 <div class="tab-pane" id="tab-history">
-  <div style="padding:10px 0 8px;border-bottom:1px solid var(--border);margin-bottom:8px" id="histSummary"></div>
-  <div class="panel" style="background:transparent;border:none;padding:0">
+
+  <!-- Filter buttons -->
+  <div class="hist-filter-bar">
+    <button class="hf-btn active" id="hf-today" onclick="setHistFilter('today')">TODAY</button>
+    <button class="hf-btn" id="hf-week" onclick="setHistFilter('week')">THIS WEEK</button>
+    <button class="hf-btn" id="hf-month" onclick="setHistFilter('month')">THIS MONTH</button>
+    <div id="histLoadingBadge" style="display:none" class="hist-loading"><div class="spin"></div> Loading...</div>
+  </div>
+
+  <!-- Summary stat cards -->
+  <div class="hist-stats">
+    <div class="hstat">
+      <div class="hstat-label">EST. P&L</div>
+      <div class="hstat-val" id="hsPnl" style="color:var(--green)">$0</div>
+      <div class="hstat-sub">@ 50% win rate</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">SIGNALS</div>
+      <div class="hstat-val" id="hsTotal" style="color:var(--accent)">0</div>
+      <div class="hstat-sub" id="hsTotalSub">BUY / SELL</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">BUY SIGNALS</div>
+      <div class="hstat-val" id="hsBuy" style="color:var(--green)">0</div>
+      <div class="hstat-sub" id="hsBuySub">—</div>
+    </div>
+    <div class="hstat">
+      <div class="hstat-label">SELL SIGNALS</div>
+      <div class="hstat-val" id="hsSell" style="color:var(--red)">0</div>
+      <div class="hstat-sub" id="hsSellSub">—</div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="panel" style="background:transparent;border:none;padding:0;overflow-x:auto">
     <table class="hist-table">
-      <thead><tr><th>TIME</th><th>SIG</th><th>ENTRY</th><th>TP</th><th>SL</th><th>CTS</th><th>RESULT</th><th>P&L</th></tr></thead>
-      <tbody id="histBody"><tr><td colspan="8" style="color:var(--muted);text-align:center;padding:24px;font-family:var(--mono);font-size:11px">No signals this session yet.</td></tr></tbody>
+      <thead>
+        <tr>
+          <th>TIME (PST)</th>
+          <th>SIG</th>
+          <th>ENTRY</th>
+          <th>TP</th>
+          <th>SL</th>
+          <th>CONTRACTS</th>
+          <th>SESSION</th>
+          <th>SCORE</th>
+          <th>CONF</th>
+          <th>EST. P&L</th>
+        </tr>
+      </thead>
+      <tbody id="histBody">
+        <tr><td colspan="10" class="hist-empty">Loading history...</td></tr>
+      </tbody>
     </table>
+    <div class="hist-note">
+      ⚠ EST. P&L assumes 50% win rate (3:1 R/R, $20/pt/contract). Logging started today — history builds over time.
+    </div>
   </div>
 </div>
 
@@ -363,75 +460,9 @@ header {
 <script>
 // ─── State ────────────────────────────────────────────────────────────────────
 let chart, candles, vwapLine, bbUp, bbLo;
-// Load history from sessionStorage
-let signalHistory = [];
-try {
-  const saved = sessionStorage.getItem('nq_signal_history');
-  if (saved) signalHistory = JSON.parse(saved);
-} catch(e) { signalHistory = []; }
-
-// P&L summary state
-let totalPnl = 0; let totalWins = 0; let totalLosses = 0;
-
-function saveHistory() {
-  try { sessionStorage.setItem('nq_signal_history', JSON.stringify(signalHistory.slice(0,100))); } catch(e) {}
-}
-
-function renderHistory() {
-  const tbody = document.getElementById('histBody');
-  if (!signalHistory.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:24px;font-family:var(--mono);font-size:11px">No signals this session yet.</td></tr>';
-    return;
-  }
-  // Recalculate totals
-  totalPnl = 0; totalWins = 0; totalLosses = 0;
-  signalHistory.forEach(h => {
-    if (h.result === 'WIN') { totalPnl += h.pnl||0; totalWins++; }
-    else if (h.result === 'LOSS') { totalPnl += h.pnl||0; totalLosses++; }
-  });
-  const wr = totalWins+totalLosses > 0 ? Math.round(totalWins/(totalWins+totalLosses)*100) : 0;
-  const summary = document.getElementById('histSummary');
-  if (summary) {
-    summary.innerHTML = `<span style="color:var(--muted);font-family:var(--mono);font-size:10px;letter-spacing:1px">
-      TODAY: <span style="color:${totalPnl>=0?'var(--green)':'var(--red)'}">$${totalPnl.toLocaleString()}</span> &nbsp;|&nbsp; 
-      WINS: <span style="color:var(--green)">${totalWins}</span> &nbsp;|&nbsp; 
-      LOSSES: <span style="color:var(--red)">${totalLosses}</span> &nbsp;|&nbsp; 
-      WR: <span style="color:var(--accent)">${wr}%</span>
-    </span>`;
-  }
-  tbody.innerHTML = signalHistory.map(h => {
-    const resultColor = h.result==='WIN' ? 'var(--green)' : h.result==='LOSS' ? 'var(--red)' : 'var(--muted)';
-    const pnlStr = h.pnl != null ? (h.pnl >= 0 ? '+$'+h.pnl.toLocaleString() : '-$'+Math.abs(h.pnl).toLocaleString()) : '—';
-    const pnlColor = h.pnl > 0 ? 'var(--green)' : h.pnl < 0 ? 'var(--red)' : 'var(--muted)';
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:10px">${h.time}</td>
-      <td><span class="sig-badge ${h.signal}">${h.signal}</span></td>
-      <td style="font-family:var(--mono)">${h.entry?.toLocaleString()||'—'}</td>
-      <td style="color:var(--green);font-family:var(--mono)">${h.tp?.toLocaleString()||'—'}</td>
-      <td style="color:var(--red);font-family:var(--mono)">${h.sl?.toLocaleString()||'—'}</td>
-      <td style="color:var(--accent)">${h.cts||'—'}x</td>
-      <td style="color:${resultColor};font-family:var(--mono);font-weight:600">${h.result||'OPEN'}</td>
-      <td style="color:${pnlColor};font-family:var(--mono);font-weight:600">${pnlStr}</td>
-    </tr>`;
-  }).join('');
-}
-
-// Check if open signals have hit TP or SL
-function checkOpenSignals(currentPrice) {
-  let updated = false;
-  signalHistory.forEach(h => {
-    if (h.result !== 'OPEN' && h.result !== undefined && h.result !== null) return;
-    if (!h.tp || !h.sl) return;
-    if (h.signal === 'BUY') {
-      if (currentPrice >= h.tp) { h.result='WIN'; h.pnl=60*20*h.cts; updated=true; }
-      else if (currentPrice <= h.sl) { h.result='LOSS'; h.pnl=-20*20*h.cts; updated=true; }
-    } else if (h.signal === 'SELL') {
-      if (currentPrice <= h.tp) { h.result='WIN'; h.pnl=60*20*h.cts; updated=true; }
-      else if (currentPrice >= h.sl) { h.result='LOSS'; h.pnl=-20*20*h.cts; updated=true; }
-    }
-  });
-  if (updated) { saveHistory(); renderHistory(); }
-}
+let currentTf = '5m';
+let histFilter = 'today'; // today | week | month
+let histData = [];
 
 // ─── Clock + Session ──────────────────────────────────────────────────────────
 function tick() {
@@ -482,10 +513,9 @@ function renderChart(d) {
   chart.timeScale().fitContent();
 }
 
-// ─── Sig color ────────────────────────────────────────────────────────────────
 function sigCol(s) { return s==='BUY'?'var(--green)':s==='SELL'?'var(--red)':'var(--yellow)'; }
 
-// ─── Update UI ────────────────────────────────────────────────────────────────
+// ─── Update main UI ───────────────────────────────────────────────────────────
 function updateUI(d) {
   const col = sigCol(d.signal);
   document.getElementById('signalCard').style.setProperty('--sig-color', col);
@@ -495,7 +525,6 @@ function updateUI(d) {
   document.getElementById('confFill').style.cssText = `width:${d.confidence}%;background:${col};box-shadow:0 0 8px ${col}`;
   document.getElementById('sigScore').textContent = 'Score: ' + d.score;
 
-  // TP/SL
   if (d.signal !== 'HOLD' && d.tp_price) {
     document.getElementById('tpslRow').style.display = 'flex';
     document.getElementById('tpVal').textContent = d.tp_price.toLocaleString();
@@ -505,10 +534,8 @@ function updateUI(d) {
     document.getElementById('tpslRow').style.display = 'none';
   }
 
-  // Event warning
   document.getElementById('eventWarn').style.display = d.event_window ? 'block' : 'none';
 
-  // Price
   document.getElementById('priceBig').textContent = d.price.toLocaleString('en-US', {minimumFractionDigits:2});
   const prev = d.price_history?.[d.price_history.length-2] || d.price;
   const chg = d.price - prev;
@@ -524,7 +551,6 @@ function updateUI(d) {
   document.getElementById('pmVol').textContent = d.volume.ratio.toFixed(2) + 'x';
   document.getElementById('pmTs').textContent = new Date(d.timestamp).toLocaleTimeString();
 
-  // Indicators
   const rsi = d.indicators.rsi;
   const rc = rsi<30?'var(--green)':rsi>70?'var(--red)':'var(--text)';
   document.getElementById('rsiCard').style.setProperty('--ind-color', rc);
@@ -553,17 +579,14 @@ function updateUI(d) {
   document.getElementById('volVal').style.color = vc;
   document.getElementById('volSt').textContent = vr>1.5?'SPIKE':'NORMAL';
 
-  // Levels
   document.getElementById('lvRes').textContent = d.resistance.toLocaleString();
   document.getElementById('lvVwap').textContent = d.indicators.vwap.toLocaleString();
   document.getElementById('lvSup').textContent = d.support.toLocaleString();
 
-  // Reasons
   const rl = document.getElementById('reasonsList');
   rl.innerHTML = (d.reasons||[]).map(r=>`<div class="reason-item"><div class="rdot"></div>${r}</div>`).join('')
     || '<div style="font-family:var(--mono);font-size:11px;color:var(--muted)">No reasoning available.</div>';
 
-  // Checklist
   const checks = [
     {n:'SESSION', v: d.session!=='outside_session'?d.session.toUpperCase():'OUTSIDE', ok: d.session!=='outside_session'},
     {n:'MACD CROSS', v: (d.reasons||[]).some(r=>r.includes('crossover'))?'DETECTED':'NONE', ok: (d.reasons||[]).some(r=>r.includes('crossover'))},
@@ -580,35 +603,126 @@ function updateUI(d) {
       <div><div class="cl-name">${c.n}</div><div class="cl-val">${c.v}</div></div>
     </div>`).join('');
 
-  // History — log new signals and check open ones
-  checkOpenSignals(d.price);
-  if (d.signal !== 'HOLD') {
-    const lastSig = signalHistory[0];
-    const isDupe = lastSig && lastSig.signal === d.signal && 
-                   Math.abs((lastSig.entry||0) - d.price) < 5 &&
-                   (Date.now() - (lastSig.ts||0)) < 5*60*1000;
-    if (!isDupe) {
-      signalHistory.unshift({
-        time: new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),
-        ts: Date.now(),
-        signal: d.signal, score: d.score,
-        entry: d.price, tp: d.tp_price, sl: d.sl_price,
-        cts: d.contracts, result: 'OPEN', pnl: null,
-        session: d.session
-      });
-      if (signalHistory.length > 100) signalHistory.pop();
-      saveHistory();
-    }
-  }
-  renderHistory();
-
-  // Chart
   if (d.price_history) renderChart(d);
-
   document.getElementById('lastUpdated').textContent = 'LAST UPDATED: ' + new Date().toLocaleString();
 }
 
-// ─── Fetch ────────────────────────────────────────────────────────────────────
+// ─── History Tab ──────────────────────────────────────────────────────────────
+function setHistFilter(f) {
+  histFilter = f;
+  ['today','week','month'].forEach(k => {
+    document.getElementById('hf-'+k).classList.toggle('active', k===f);
+  });
+  fetchHistory();
+}
+
+function daysForFilter(f) {
+  if (f === 'today') return 1;
+  if (f === 'week')  return 7;
+  if (f === 'month') return 31;
+  return 1;
+}
+
+// Estimated P&L using 50% win rate assumption
+// Each win = TP_POINTS * $20/pt * contracts
+// Each loss = SL_POINTS * $20/pt * contracts
+// At 50% WR: avg per trade = (60*20*cts - 20*20*cts) / 2 = 800 * cts per trade avg
+function estimatePnl(signals) {
+  const WIN_PTS = 60, SL_PTS = 20, PER_PT = 20, WR = 0.5;
+  let total = 0;
+  signals.forEach(s => {
+    const cts = s.contracts || 1;
+    const winPnl  =  WIN_PTS * PER_PT * cts;
+    const lossPnl = -SL_PTS  * PER_PT * cts;
+    total += (winPnl * WR) + (lossPnl * (1 - WR));
+  });
+  return Math.round(total);
+}
+
+function fmtPnl(n) {
+  const sign = n >= 0 ? '+' : '-';
+  return sign + '$' + Math.abs(n).toLocaleString();
+}
+
+function fmtTime(iso) {
+  try {
+    return new Date(iso).toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'numeric', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+  } catch(e) { return iso; }
+}
+
+function renderHistoryTable(signals) {
+  const tbody = document.getElementById('histBody');
+
+  // Only BUY/SELL for P&L stats
+  const actionable = signals.filter(s => s.signal === 'BUY' || s.signal === 'SELL');
+  const buys  = actionable.filter(s => s.signal === 'BUY');
+  const sells = actionable.filter(s => s.signal === 'SELL');
+  const estPnl = estimatePnl(actionable);
+
+  // Update stat cards
+  document.getElementById('hsPnl').textContent = fmtPnl(estPnl);
+  document.getElementById('hsPnl').style.color = estPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  document.getElementById('hsTotal').textContent = actionable.length;
+  document.getElementById('hsTotalSub').textContent = buys.length + ' BUY / ' + sells.length + ' SELL';
+  document.getElementById('hsBuy').textContent = buys.length;
+  document.getElementById('hsSell').textContent = sells.length;
+
+  // Avg confidence
+  const avgConf = actionable.length
+    ? (actionable.reduce((a,s) => a + (s.confidence||0), 0) / actionable.length).toFixed(1)
+    : '—';
+  document.getElementById('hsBuySub').textContent = 'avg conf: ' + avgConf + '%';
+  document.getElementById('hsSellSub').textContent = 'avg score: ' +
+    (actionable.length ? (actionable.reduce((a,s) => a + Math.abs(s.score||0), 0) / actionable.length).toFixed(3) : '—');
+
+  if (!actionable.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="hist-empty">No BUY/SELL signals logged yet for this period.<br><span style="font-size:9px;opacity:0.5">Logging started today — signals accumulate over time.</span></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = actionable.map(s => {
+    const estPerTrade = estimatePnl([s]);
+    const pnlColor = estPerTrade >= 0 ? 'var(--green)' : 'var(--red)';
+    const sess = (s.session || 'outside').replace('_session','').toUpperCase();
+    const sessColor = sess === 'US' ? 'var(--green)' : sess === 'LONDON' ? '#4fc3f7' : 'var(--muted)';
+    return `<tr>
+      <td style="color:var(--muted)">${fmtTime(s.logged_at)}</td>
+      <td><span class="sig-badge ${s.signal}">${s.signal}</span></td>
+      <td style="color:var(--text)">${(s.price||0).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+      <td style="color:var(--green)">${s.tp_price ? s.tp_price.toLocaleString() : '—'}</td>
+      <td style="color:var(--red)">${s.sl_price ? s.sl_price.toLocaleString() : '—'}</td>
+      <td style="color:var(--accent);text-align:center">${s.contracts || 1}x</td>
+      <td style="color:${sessColor}">${sess}</td>
+      <td style="color:${s.score >= 0 ? 'var(--green)' : 'var(--red)'}">${s.score >= 0 ? '+' : ''}${(s.score||0).toFixed(3)}</td>
+      <td style="color:var(--text)">${(s.confidence||0).toFixed(1)}%</td>
+      <td style="color:${pnlColor};font-weight:600">${fmtPnl(estPerTrade)}<span class="est-badge">EST</span></td>
+    </tr>`;
+  }).join('');
+}
+
+async function fetchHistory() {
+  const loading = document.getElementById('histLoadingBadge');
+  loading.style.display = 'flex';
+  try {
+    const days = daysForFilter(histFilter);
+    const r = await fetch('/history?days=' + days + '&actionable=1');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    histData = data.signals || [];
+    renderHistoryTable(histData);
+  } catch(e) {
+    document.getElementById('histBody').innerHTML =
+      '<tr><td colspan="10" class="hist-empty">Could not load history. Is the agent running?</td></tr>';
+    console.warn('History fetch failed:', e);
+  }
+  loading.style.display = 'none';
+}
+
+// ─── Fetch signal ─────────────────────────────────────────────────────────────
 async function fetchSignal() {
   document.getElementById('refreshBtn').disabled = true;
   try {
@@ -620,7 +734,6 @@ async function fetchSignal() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     document.getElementById('liveStatus').textContent = 'LIVE';
-    // Update chart label
     const chartLabel = document.querySelector('.chart-tf-label');
     if (chartLabel) chartLabel.textContent = (currentTf || '5m').toUpperCase();
     updateUI(d);
@@ -652,8 +765,10 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
+  // Auto-load history when tab is opened
+  if (name === 'history') fetchHistory();
 }
-let currentTf = '5m';
+
 function switchTf(tf) {
   currentTf = tf;
   ['1m','5m','1h'].forEach(t => document.getElementById('tf'+t).classList.toggle('active', t===tf));
@@ -666,6 +781,10 @@ window.addEventListener('load', () => {
   fetchSignal();
   fetchCommentary();
   setInterval(fetchSignal, 5*60*1000);
+  // Refresh history every 5 min if on that tab
+  setInterval(() => {
+    if (document.getElementById('tab-history').classList.contains('active')) fetchHistory();
+  }, 5*60*1000);
 });
 </script>
 </body>
