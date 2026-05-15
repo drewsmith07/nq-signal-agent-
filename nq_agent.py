@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-NQ Futures Scalping Signal Agent - v3.0
+NQ Futures Scalping Signal Agent - v3.1
 Real-time data via ProjectX/TopstepX API — zero lag
++ Signal history logging (persists to signals_log.json)
 """
 
 import pandas as pd
 import numpy as np
 import json
+import os
 import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
@@ -14,6 +16,79 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+
+# ─── Signal History ───────────────────────────────────────────────────────────
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
+_signal_history = []  # in-memory cache
+
+def _load_history():
+    """Load existing history from disk on startup."""
+    global _signal_history
+    try:
+        if os.path.exists(LOG_FILE):
+            with open(LOG_FILE, 'r') as f:
+                _signal_history = json.load(f)
+            print(f"[History] Loaded {len(_signal_history)} signals from disk.")
+        else:
+            _signal_history = []
+            print("[History] No existing log found — starting fresh.")
+    except Exception as e:
+        print(f"[History] Failed to load log: {e}")
+        _signal_history = []
+
+def _save_history():
+    """Persist history to disk."""
+    try:
+        with open(LOG_FILE, 'w') as f:
+            json.dump(_signal_history, f)
+    except Exception as e:
+        print(f"[History] Failed to save log: {e}")
+
+def _log_signal(result):
+    """Append a signal to history and persist. Logs ALL signals including HOLD."""
+    import pytz
+    pst = pytz.timezone('US/Pacific')
+    now_pst = datetime.now(pst).isoformat()
+
+    entry = {
+        "logged_at":  now_pst,
+        "signal":     result.get("signal"),
+        "price":      result.get("price"),
+        "score":      result.get("score"),
+        "confidence": result.get("confidence"),
+        "session":    result.get("session"),
+        "event_window": result.get("event_window", False),
+        "contracts":  result.get("contracts", 0),
+        "tp_price":   result.get("tp_price"),
+        "sl_price":   result.get("sl_price"),
+        "tp_points":  result.get("tp_points"),
+        "sl_points":  result.get("sl_points"),
+        "indicators": {
+            "rsi":            result["indicators"].get("rsi"),
+            "macd_histogram": result["indicators"].get("macd_histogram"),
+            "bb_position":    result["indicators"].get("bb_position"),
+            "vwap":           result["indicators"].get("vwap"),
+            "atr":            result["indicators"].get("atr"),
+            "fvg_type":       result["indicators"].get("fvg_type"),
+            "ob_direction":   result["indicators"].get("ob_direction"),
+        },
+        "volume_ratio": result.get("volume", {}).get("ratio"),
+        "reasons":    result.get("reasons", []),
+        # outcome fields — to be filled in later when history tab is built
+        "result":     None,   # "TP_HIT" | "SL_HIT" | "OPEN" | "EXPIRED"
+        "pnl":        None,   # dollar P&L once outcome is known
+    }
+
+    _signal_history.append(entry)
+
+    # Keep last 5000 entries to prevent unbounded growth
+    if len(_signal_history) > 5000:
+        _signal_history.pop(0)
+
+    _save_history()
+
+# Load history on startup
+_load_history()
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
@@ -254,7 +329,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     avg_vol = df_5m['Volume'].rolling(20).mean().iloc[-1]
     vol_ratio_val = df_5m['Volume'].iloc[-1] / avg_vol if avg_vol > 0 else 1.0
 
-    # Use REAL current time for session — not data timestamp
     real_now = pd.Timestamp.now(tz='UTC')
     window = _get_window(real_now)
     ct = df_5m.index[-1]
@@ -382,7 +456,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
 
 @app.route('/')
 def index():
-    import os
     dashboard = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'nq_dashboard.html')
     if os.path.exists(dashboard):
         with open(dashboard, 'r') as f:
@@ -420,7 +493,6 @@ def get_signal():
         import pytz
         tf = request.args.get('tf', '5m')
 
-        # Fetch real-time data from ProjectX
         if tf == '1m':
             df_main = get_nq_bars(interval_minutes=1, lookback_days=1, limit=300)
         elif tf == '1h':
@@ -439,7 +511,6 @@ def get_signal():
         new_sig = result["signal"]
         new_ts  = result["timestamp"]
 
-        # Override chart with selected TF
         result['price_history'] = [round(float(x), 2) for x in df_main['Close'].tail(60).tolist()]
         result['high_history']   = [round(float(x), 2) for x in df_main['High'].tail(60).tolist()]
         result['low_history']    = [round(float(x), 2) for x in df_main['Low'].tail(60).tolist()]
@@ -447,7 +518,10 @@ def get_signal():
         result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
         result['chart_tf']       = tf
 
-        # Deploy log
+        # ── LOG EVERY SIGNAL ──────────────────────────────────────────────────
+        _log_signal(result)
+        # ─────────────────────────────────────────────────────────────────────
+
         pst = pytz.timezone('US/Pacific')
         now_pst = datetime.now(pst).strftime('%m/%d %H:%M PST')
         try:
@@ -478,7 +552,7 @@ def get_signal():
 @app.route('/commentary')
 def get_commentary():
     try:
-        import os, urllib.request, urllib.parse, json as json_mod
+        import urllib.request, urllib.parse, json as json_mod
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             return jsonify({"commentary": "API key not configured."})
@@ -503,10 +577,79 @@ Write 3-4 sentences explaining the signal in plain English."""
     except Exception as e:
         return jsonify({"commentary": f"Commentary unavailable: {str(e)}"})
 
+# ─── History Endpoint ─────────────────────────────────────────────────────────
+
+@app.route('/history')
+def get_history():
+    """
+    Returns logged signals.
+    Query params:
+      ?days=N       — last N days (default 3, max 30)
+      ?limit=N      — max entries to return (default 500)
+      ?signal=BUY   — filter by signal type (BUY | SELL | HOLD)
+      ?actionable=1 — only return BUY/SELL signals (excludes HOLD)
+    """
+    try:
+        days    = min(int(request.args.get('days', 3)), 30)
+        limit   = min(int(request.args.get('limit', 500)), 5000)
+        sig_filter = request.args.get('signal', '').upper()
+        actionable = request.args.get('actionable', '0') == '1'
+
+        import pytz
+        pst = pytz.timezone('US/Pacific')
+        cutoff = datetime.now(pst) - timedelta(days=days)
+
+        filtered = []
+        for entry in reversed(_signal_history):
+            try:
+                ts = datetime.fromisoformat(entry['logged_at'])
+                if ts.tzinfo is None:
+                    ts = pst.localize(ts)
+                if ts < cutoff:
+                    continue
+            except:
+                continue
+
+            if sig_filter and entry.get('signal') != sig_filter:
+                continue
+            if actionable and entry.get('signal') == 'HOLD':
+                continue
+
+            filtered.append(entry)
+            if len(filtered) >= limit:
+                break
+
+        # Summary stats for BUY/SELL signals in the window
+        actionable_signals = [e for e in filtered if e.get('signal') in ('BUY', 'SELL')]
+        buy_count  = sum(1 for e in actionable_signals if e['signal'] == 'BUY')
+        sell_count = sum(1 for e in actionable_signals if e['signal'] == 'SELL')
+        hold_count = sum(1 for e in filtered if e['signal'] == 'HOLD')
+
+        return jsonify({
+            "count": len(filtered),
+            "days_requested": days,
+            "summary": {
+                "total_signals": len(filtered),
+                "actionable":    len(actionable_signals),
+                "buy":           buy_count,
+                "sell":          sell_count,
+                "hold":          hold_count,
+            },
+            "signals": filtered
+        })
+    except Exception as e:
+        print(f"[ERROR] /history failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/health')
 def health():
-    return jsonify({"status": "ok", "version": "3.0", "data_source": "ProjectX/TopstepX"})
+    return jsonify({
+        "status": "ok",
+        "version": "3.1",
+        "data_source": "ProjectX/TopstepX",
+        "history_count": len(_signal_history)
+    })
 
 if __name__ == "__main__":
-    print("🚀 NQ Signal Agent v3.0 — Real-time ProjectX data")
+    print("🚀 NQ Signal Agent v3.1 — Real-time ProjectX data + Signal History")
     app.run(host="0.0.0.0", port=8080, debug=False)
