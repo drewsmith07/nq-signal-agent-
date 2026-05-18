@@ -92,7 +92,7 @@ _load_history()
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
-PX_API_KEY  = 'BdrBl456O5VAW5N1GdSyd3QjeC7eOilcpizEeZ6+5eg='
+PX_API_KEY  = 'TX3KKsllr69YaSrdTftiaj/Ew6tGQ5cUzG9cTD7GgOM='
 PX_BASE_URL = 'https://api.topstepx.com/api'
 NQ_CONTRACT = 'CON.F.US.ENQ.M26'  # Front month NQ — update on rollover
 
