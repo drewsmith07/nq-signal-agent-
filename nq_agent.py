@@ -466,6 +466,33 @@ PUSHOVER_TOKEN = "av7z24evdn1h55qqkk4gxptm94uk9q"
 PUSHOVER_USER  = "ui2s5wt3qxb1zt75sphspwubx4ntac"
 last_signal = {"signal": "HOLD", "price": 0, "timestamp": None}
 
+def send_retell_call(signal, entry, tp, sl, contracts):
+    """Call Andrew's phone via Retell AI when a BUY/SELL signal fires."""
+    try:
+        message = (
+            f"N Q {signal} signal. "
+            f"Entry {int(entry)}. "
+            f"Target {int(tp)}. "
+            f"Stop {int(sl)}. "
+            f"{contracts} contract{'s' if contracts > 1 else ''}."
+        )
+        payload = {
+            "from_number": "+19495418082",
+            "to_number": "+16027624989",
+            "override_agent_config": {
+                "general_prompt": f"Say exactly this and nothing else: {message}",
+                "begin_message": message
+            }
+        }
+        headers = {
+            "Authorization": "Bearer key_65b4386d7c101f08438cbb68c09f",
+            "Content-Type": "application/json"
+        }
+        r = requests.post("https://api.retellai.com/v2/create-phone-call", json=payload, headers=headers, timeout=10)
+        print(f"📞 Retell call triggered: {r.status_code} | {signal} @ {entry}")
+    except Exception as e:
+        print(f"Retell call error: {e}")
+
 def send_pushover(signal, price, confidence, score, result=None):
     try:
         import urllib.request, urllib.parse
@@ -542,6 +569,7 @@ def get_signal():
 
         if new_sig in ("BUY", "SELL") and new_sig != last_signal["signal"]:
             send_pushover(new_sig, result["price"], result["confidence"], result["score"], result)
+            send_retell_call(new_sig, result["price"], result["tp_price"], result["sl_price"], result["contracts"])
             last_signal = {"signal": new_sig, "price": result["price"], "timestamp": new_ts}
 
         return jsonify(result)
