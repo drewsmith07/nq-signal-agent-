@@ -449,6 +449,7 @@ header {
   <button class="tab-btn active" onclick="switchTab('signal')">SIGNAL</button>
   <button class="tab-btn" onclick="switchTab('checklist')">CHECKLIST</button>
   <button class="tab-btn" onclick="switchTab('history')" id="histTabBtn">HISTORY</button>
+  <button class="tab-btn" onclick="switchTab('chat')">CHAT</button>
 </div>
 
 <!-- Signal tab -->
@@ -907,7 +908,7 @@ async function fetchCommentary() {
 
 // ─── Tabs + TF ────────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const tabs = ['signal','checklist','history'];
+  const tabs = ['signal','checklist','history','chat'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
