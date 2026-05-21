@@ -272,6 +272,27 @@ header {
   .price-big { font-size: 52px; }
   .hist-stats { grid-template-columns: repeat(4, 1fr); }
 }
+
+/* Chat */
+.quick-prompt {
+  background: transparent; border: 1px solid var(--border); color: var(--muted);
+  font-family: var(--mono); font-size: 9px; padding: 3px 9px; cursor: pointer;
+  letter-spacing: 1px; transition: all 0.2s;
+}
+.quick-prompt:hover { border-color: var(--accent); color: var(--accent); }
+.chat-msg { display: flex; flex-direction: column; gap: 3px; max-width: 85%; }
+.chat-msg.user { align-self: flex-end; align-items: flex-end; }
+.chat-msg.assistant { align-self: flex-start; align-items: flex-start; }
+.chat-bubble { padding: 10px 14px; font-size: 12px; line-height: 1.6; }
+.chat-msg.user .chat-bubble { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); color: var(--text); font-family: var(--mono); }
+.chat-msg.assistant .chat-bubble { background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: var(--text); font-family: var(--sans); }
+.chat-meta { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+.chat-typing { display: flex; gap: 4px; align-items: center; padding: 10px 14px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); width: fit-content; }
+.chat-typing span { width: 4px; height: 4px; background: var(--accent); border-radius: 50%; animation: chatdot 1.2s infinite; }
+.chat-typing span:nth-child(2) { animation-delay: 0.2s; }
+.chat-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes chatdot { 0%,60%,100%{opacity:0.2;transform:scale(1)} 30%{opacity:1;transform:scale(1.3)} }
+
 </style>
 </head>
 <body>
@@ -450,6 +471,58 @@ header {
     </table>
     <div class="hist-note">
       ⚠ EST. P&L assumes 50% win rate (3:1 R/R, $20/pt/contract). Logging started today — history builds over time.
+    </div>
+  </div>
+</div>
+
+
+<!-- Chat tab -->
+<div class="tab-pane" id="tab-chat">
+  <div style="display:flex;flex-direction:column;height:520px;background:var(--panel);border:1px solid var(--border);">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--accent);letter-spacing:3px;">AI TRADING ASSISTANT</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px;letter-spacing:1px;">LIVE MARKET DATA · REAL-TIME INDICATORS</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div id="chatMarketSnap" style="font-family:var(--mono);font-size:9px;color:var(--muted);text-align:right;"></div>
+        <button onclick="clearChat()" style="background:transparent;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:9px;padding:3px 8px;cursor:pointer;letter-spacing:1px;">CLEAR</button>
+      </div>
+    </div>
+    <div style="padding:8px 16px;border-bottom:1px solid var(--border);background:rgba(0,212,255,0.03);">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:5px;">POSITION CONTEXT (optional)</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <select id="chatSide" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 6px;">
+          <option value="">No Position</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option>
+        </select>
+        <input id="chatEntry" type="number" placeholder="Entry price" step="0.25" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 8px;width:120px;">
+        <input id="chatContracts" type="number" placeholder="Contracts" min="1" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 8px;width:90px;">
+        <input id="chatPnl" type="number" placeholder="Unreal P&amp;L $" step="1" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 8px;width:110px;">
+        <input id="chatTp" type="number" placeholder="TP" step="0.25" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 8px;width:100px;">
+        <input id="chatSl" type="number" placeholder="SL" step="0.25" style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:10px;padding:3px 8px;width:100px;">
+      </div>
+    </div>
+    <div id="chatMessages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;">
+      <div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px;padding:20px 0;">
+        Ask anything about the current market, your position, or setup.<br>
+        <span style="color:var(--accent);opacity:0.6;">The assistant has live NQ data and all indicators.</span>
+      </div>
+    </div>
+    <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="quick-prompt" onclick="sendQuick('What does the current setup look like?')">Setup?</button>
+      <button class="quick-prompt" onclick="sendQuick('Should I add contracts to my position?')">Add contracts?</button>
+      <button class="quick-prompt" onclick="sendQuick('Where should I move my stop loss?')">Move SL?</button>
+      <button class="quick-prompt" onclick="sendQuick('Is momentum still bullish or fading?')">Momentum?</button>
+      <button class="quick-prompt" onclick="sendQuick('What are the key levels to watch right now?')">Key levels?</button>
+    </div>
+    <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <input id="chatInput" type="text" placeholder="Ask the trading assistant..."
+        style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:8px 12px;outline:none;"
+        onkeydown="if(event.key==='Enter')sendChat()">
+      <button id="chatSendBtn" onclick="sendChat()"
+        style="background:var(--accent);border:none;color:var(--bg);font-family:var(--mono);font-size:11px;font-weight:700;padding:8px 20px;cursor:pointer;letter-spacing:1px;">
+        SEND
+      </button>
     </div>
   </div>
 </div>

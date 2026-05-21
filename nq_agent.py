@@ -641,6 +641,115 @@ def get_history():
         print(f"[ERROR] /history failed: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    """
+    Live AI trading assistant — knows current market data.
+    POST body: { "message": "...", "history": [...], "position": {...} }
+    """
+    try:
+        import json as json_mod
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        if not api_key:
+            return jsonify({"reply": "ANTHROPIC_API_KEY not set in Railway Variables."})
+
+        body = request.get_json(force=True) or {}
+        user_message = body.get('message', '').strip()
+        conversation_history = body.get('history', [])
+        position = body.get('position', {})
+
+        if not user_message:
+            return jsonify({"reply": "No message provided."})
+
+        # Pull live market data
+        try:
+            df_5m = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
+            df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+            df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+            market = generate_signal(df_5m, df_1h, df_1m)
+            market_context = f"""
+LIVE MARKET DATA (as of right now):
+- NQ Price: {market['price']}
+- Signal: {market['signal']} | Score: {market['score']} | Confidence: {market['confidence']}%
+- Session: {market['session'].upper()}
+- RSI: {market['indicators']['rsi']}
+- MACD Histogram: {market['indicators']['macd_histogram']} ('bullish' if {market['indicators']['macd_histogram']} > 0 else 'bearish')
+- BB Position: {market['indicators']['bb_position']*100:.0f}% (0%=lower band, 100%=upper band)
+- VWAP: {market['indicators']['vwap']} (price is 'ABOVE' if {market['price']} > {market['indicators']['vwap']} else 'BELOW' VWAP)
+- Volume Ratio: {market['volume']['ratio']}x {'(SPIKE)' if market['volume']['spike'] else ''}
+- ATR: {market['indicators']['atr']}
+- Support: {market['support']} | Resistance: {market['resistance']}
+- FVG: {market['indicators']['fvg_type']} {'(price in gap)' if market['indicators']['fvg_in_gap'] else ''}
+- Order Block: {'bullish' if market['indicators']['ob_direction']==1 else 'bearish' if market['indicators']['ob_direction']==-1 else 'none'}
+- Event Window Active: {market['event_window']}
+- Signal Reasons: {'; '.join(market['reasons'])}
+- TP: {market['tp_price']} | SL: {market['sl_price']} | R/R: 3:1
+"""
+            market_snap = {"price": market.get('price'), "signal": market.get('signal'), "score": market.get('score'), "session": market.get('session')}
+        except Exception as e:
+            market_context = f"[Market data unavailable: {str(e)}]"
+            market_snap = {}
+
+        position_context = ""
+        if position and position.get('side'):
+            position_context = f"""
+CURRENT POSITION:
+- Side: {position.get('side')}
+- Entry: {position.get('entry')}
+- Contracts: {position.get('contracts')}
+- Unrealized P&L: ${position.get('pnl')}
+- TP: {position.get('tp', 'not set')} | SL: {position.get('sl', 'not set')}
+"""
+
+        system_prompt = f"""You are an expert NQ futures scalping assistant embedded in a live trading dashboard. You have real-time access to market data and indicators. Be direct, concise, and actionable. Answer like a sharp trading coach — no fluff.
+
+Your knowledge base:
+- Scalping system: TP=60pts, SL=20pts, R/R=3:1
+- Sessions: London (2-4am PST) and US (6:30-10:30am PST) only for signals
+- Scoring engine uses RSI, MACD, BB, VWAP, FVG, Order Blocks, RSI Divergence
+- Signal threshold: 0.38 (US session), 0.45 (London)
+- Contract sizing: 1 (score<0.45), 2 (0.45-0.55), 3 (>0.55)
+- Baseline: $55,200 net P/L, 50% WR, 78 signals over 60 days
+
+{market_context}
+{position_context}
+
+Keep responses under 5 sentences unless detail is needed. Be direct with trade advice."""
+
+        messages = []
+        for h in conversation_history[-10:]:
+            if h.get('role') in ('user', 'assistant') and h.get('content'):
+                messages.append({"role": h['role'], "content": h['content']})
+        messages.append({"role": "user", "content": user_message})
+
+        import urllib.request
+        payload = json_mod.dumps({
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 400,
+            "system": system_prompt,
+            "messages": messages
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            }
+        )
+        resp = urllib.request.urlopen(req, timeout=20)
+        result = json_mod.loads(resp.read())
+        reply = result["content"][0]["text"]
+
+        return jsonify({"reply": reply, "market_snapshot": market_snap})
+
+    except Exception as e:
+        print(f"[ERROR] /chat failed: {e}")
+        return jsonify({"reply": f"Chat error: {str(e)}"})
+
 @app.route('/health')
 def health():
     return jsonify({
