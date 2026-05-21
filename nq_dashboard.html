@@ -976,7 +976,7 @@ async function fetchCommentary() {
 
 // ─── Tabs + TF ────────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const tabs = ['signal','checklist','history'];
+  const tabs = ['signal','checklist','history','chat'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
