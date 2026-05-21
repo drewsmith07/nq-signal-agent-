@@ -346,25 +346,21 @@ header {
   .hist-stats { grid-template-columns: repeat(4, 1fr); }
 }
 
-/* Chat */
-.quick-prompt {
-  background: transparent; border: 1px solid var(--border); color: var(--muted);
-  font-family: var(--mono); font-size: 9px; padding: 3px 9px; cursor: pointer;
-  letter-spacing: 1px; transition: all 0.2s;
-}
-.quick-prompt:hover { border-color: var(--accent); color: var(--accent); }
-.chat-msg { display: flex; flex-direction: column; gap: 3px; max-width: 85%; }
-.chat-msg.user { align-self: flex-end; align-items: flex-end; }
-.chat-msg.assistant { align-self: flex-start; align-items: flex-start; }
-.chat-bubble { padding: 10px 14px; font-size: 12px; line-height: 1.6; }
-.chat-msg.user .chat-bubble { background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); color: var(--text); font-family: var(--mono); }
-.chat-msg.assistant .chat-bubble { background: rgba(255,255,255,0.03); border: 1px solid var(--border); color: var(--text); font-family: var(--sans); }
-.chat-meta { font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
-.chat-typing { display: flex; gap: 4px; align-items: center; padding: 10px 14px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); width: fit-content; }
-.chat-typing span { width: 4px; height: 4px; background: var(--accent); border-radius: 50%; animation: chatdot 1.2s infinite; }
-.chat-typing span:nth-child(2) { animation-delay: 0.2s; }
-.chat-typing span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes chatdot { 0%,60%,100%{opacity:0.2;transform:scale(1)} 30%{opacity:1;transform:scale(1.3)} }
+/* ── Chat ── */
+.quick-prompt{background:transparent;border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:9px;padding:3px 9px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;}
+.quick-prompt:hover{border-color:var(--accent);color:var(--accent);}
+.chat-msg{display:flex;flex-direction:column;gap:3px;max-width:85%;}
+.chat-msg.user{align-self:flex-end;align-items:flex-end;}
+.chat-msg.assistant{align-self:flex-start;align-items:flex-start;}
+.chat-bubble{padding:10px 14px;font-size:12px;line-height:1.6;}
+.chat-msg.user .chat-bubble{background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);color:var(--text);font-family:var(--mono);}
+.chat-msg.assistant .chat-bubble{background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);font-family:var(--sans);}
+.chat-meta{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:1px;}
+.chat-typing{display:flex;gap:4px;align-items:center;padding:10px 14px;border:1px solid var(--border);background:rgba(255,255,255,0.03);width:fit-content;}
+.chat-typing span{width:4px;height:4px;background:var(--accent);border-radius:50%;animation:chatdot 1.2s infinite;}
+.chat-typing span:nth-child(2){animation-delay:0.2s;}
+.chat-typing span:nth-child(3){animation-delay:0.4s;}
+@keyframes chatdot{0%,60%,100%{opacity:0.2;transform:scale(1)}30%{opacity:1;transform:scale(1.3)}}
 
 </style>
 </head>
@@ -449,7 +445,6 @@ header {
   <button class="tab-btn active" onclick="switchTab('signal')">SIGNAL</button>
   <button class="tab-btn" onclick="switchTab('checklist')">CHECKLIST</button>
   <button class="tab-btn" onclick="switchTab('history')" id="histTabBtn">HISTORY</button>
-  <button class="tab-btn" onclick="switchTab('chat')">CHAT</button>
 </div>
 
 <!-- Signal tab -->
@@ -908,7 +903,7 @@ async function fetchCommentary() {
 
 // ─── Tabs + TF ────────────────────────────────────────────────────────────────
 function switchTab(name) {
-  const tabs = ['signal','checklist','history','chat'];
+  const tabs = ['signal','checklist','history'];
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', tabs[i]===name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
