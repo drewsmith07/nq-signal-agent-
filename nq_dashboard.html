@@ -6,7 +6,80 @@
 <title>NQ Signal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js">
+// ── Chat ──────────────────────────────────────────────────────────────────────
+let chatHistory = [];
+function getPositionContext() {
+  const side = document.getElementById('chatSide').value;
+  if (!side) return {};
+  return {
+    side,
+    entry: parseFloat(document.getElementById('chatEntry').value) || null,
+    contracts: parseInt(document.getElementById('chatContracts').value) || null,
+    pnl: parseFloat(document.getElementById('chatPnl').value) || null,
+    tp: parseFloat(document.getElementById('chatTp').value) || null,
+    sl: parseFloat(document.getElementById('chatSl').value) || null,
+  };
+}
+function appendMessage(role, content, meta) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg ' + role;
+  div.innerHTML = '<div class="chat-bubble">' + content.replace(/\n/g, '<br>') + '</div>' + (meta ? '<div class="chat-meta">' + meta + '</div>' : '');
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+function showTyping() {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg assistant'; div.id = 'chatTyping';
+  div.innerHTML = '<div class="chat-typing"><span></span><span></span><span></span></div>';
+  container.appendChild(div); container.scrollTop = container.scrollHeight;
+}
+function removeTyping() { const el = document.getElementById('chatTyping'); if (el) el.remove(); }
+function updateMarketSnap(snap) {
+  if (!snap || !snap.price) return;
+  const el = document.getElementById('chatMarketSnap');
+  const col = snap.signal === 'BUY' ? 'var(--green)' : snap.signal === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+  el.innerHTML = '<span style="color:var(--text)">' + snap.price.toLocaleString() + '</span> &nbsp;<span style="color:' + col + '">' + snap.signal + '</span><br><span style="color:var(--muted)">' + (snap.session||'').toUpperCase() + ' · score ' + snap.score + '</span>';
+}
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const btn = document.getElementById('chatSendBtn');
+  const msg = input.value.trim();
+  if (!msg || btn.disabled) return;
+  input.value = ''; btn.disabled = true; btn.style.opacity = '0.4';
+  const time = new Date().toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+  appendMessage('user', msg, time + ' PT');
+  showTyping();
+  try {
+    const res = await fetch('/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message: msg, history: chatHistory, position: getPositionContext() })
+    });
+    const data = await res.json();
+    removeTyping();
+    const reply = data.reply || 'No response.';
+    appendMessage('assistant', reply, 'NQ ASSISTANT · ' + time + ' PT');
+    chatHistory.push({role: 'user', content: msg});
+    chatHistory.push({role: 'assistant', content: reply});
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    if (data.market_snapshot) updateMarketSnap(data.market_snapshot);
+  } catch(e) {
+    removeTyping();
+    appendMessage('assistant', 'Error connecting to assistant. Check Railway is online.', '');
+  }
+  btn.disabled = false; btn.style.opacity = '1';
+  document.getElementById('chatInput').focus();
+}
+function sendQuick(msg) { document.getElementById('chatInput').value = msg; sendChat(); }
+function clearChat() {
+  chatHistory = [];
+  document.getElementById('chatMessages').innerHTML = '<div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:1px;padding:20px 0;">Ask anything about the current market, your position, or setup.</div>';
+}
+
+</script>
 <style>
 :root {
   --bg: #080c10;
