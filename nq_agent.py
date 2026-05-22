@@ -479,8 +479,8 @@ def send_retell_call(signal, entry, tp, sl, contracts):
         payload = {
             "from_number": "+19495418082",
             "to_number": "+16027624989",
-            "override_agent_config": {
-                "general_prompt": f"Say exactly this and nothing else: {message}",
+            "agent_id": "agent_a69b5578cad116bdf18c075867",
+            "retell_llm_dynamic_variables": {
                 "begin_message": message
             }
         }
