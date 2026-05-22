@@ -469,11 +469,11 @@ last_signal = {"signal": "HOLD", "price": 0, "timestamp": None}
 def send_retell_call(signal, entry, tp, sl, contracts):
     """Call Andrew's phone via Retell AI when a BUY/SELL signal fires."""
     try:
+        action = "Buy, buy, buy!" if signal == "BUY" else "Sell, sell, sell!"
         message = (
-            f"N Q {signal} signal. "
-            f"Entry {int(entry)}. "
-            f"Target {int(tp)}. "
-            f"Stop {int(sl)}. "
+            f"{action} "
+            f"Take profit {int(tp)}. "
+            f"Stop loss {int(sl)}. "
             f"{contracts} contract{'s' if contracts > 1 else ''}."
         )
         payload = {
