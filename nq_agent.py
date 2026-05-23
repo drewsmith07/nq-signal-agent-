@@ -565,10 +565,6 @@ def get_signal():
         result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
         result['chart_tf']       = tf
 
-        # ── LOG EVERY SIGNAL ──────────────────────────────────────────────────
-        _log_signal(result)
-        # ─────────────────────────────────────────────────────────────────────
-
         pst = pytz.timezone('US/Pacific')
         now_pst = datetime.now(pst).strftime('%m/%d %H:%M PST')
         try:
@@ -588,6 +584,7 @@ def get_signal():
             print(f"  ↳ NEAR-MISS: {direction} signal {gap:.3f} pts below threshold ({thr})")
 
         if new_sig in ("BUY", "SELL") and new_sig != last_signal["signal"]:
+            _log_signal(result)
             send_pushover(new_sig, result["price"], result["confidence"], result["score"], result)
             send_retell_call(new_sig, result["price"], result["tp_price"], result["sl_price"], result["contracts"])
             last_signal = {"signal": new_sig, "price": result["price"], "timestamp": new_ts}
