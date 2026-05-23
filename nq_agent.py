@@ -57,7 +57,9 @@ def _save_history():
         print(f"[History] Failed to save log: {e}")
 
 def _log_signal(result):
-    """Log signal to Supabase + in-memory cache."""
+    """Log signal to Supabase — BUY/SELL only, no HOLDs."""
+    if result.get("signal") not in ("BUY", "SELL"):
+        return
     import pytz
     pst = pytz.timezone('US/Pacific')
     now_pst = datetime.now(pst).isoformat()

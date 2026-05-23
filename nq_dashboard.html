@@ -541,7 +541,7 @@ header {
       </tbody>
     </table>
     <div class="hist-note">
-      ⚠ EST. P&L assumes 50% win rate (3:1 R/R, $20/pt/contract). Logging started today — history builds over time.
+      ⚠ P&L shows real outcome when TP/SL is hit. EST shown for unresolved trades (50% WR assumption).
     </div>
   </div>
 </div>
@@ -807,11 +807,18 @@ function renderHistoryTable(signals) {
   const sells = actionable.filter(s => s.signal === 'SELL');
   const estPnl = estimatePnl(actionable);
 
-  // Update stat cards
-  document.getElementById('hsPnl').textContent = fmtPnl(estPnl);
-  document.getElementById('hsPnl').style.color = estPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  // Stat cards — use real P&L if any resolved, else estimated
+  const resolved = actionable.filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+  const realPnl = resolved.reduce((a, s) => a + (s.pnl || 0), 0);
+  const wins = resolved.filter(s => s.outcome === 'WIN').length;
+  const losses = resolved.filter(s => s.outcome === 'LOSS').length;
+  const displayPnl = resolved.length > 0 ? realPnl : estPnl;
+  document.getElementById('hsPnl').textContent = fmtPnl(displayPnl);
+  document.getElementById('hsPnl').style.color = displayPnl >= 0 ? 'var(--green)' : 'var(--red)';
   document.getElementById('hsTotal').textContent = actionable.length;
-  document.getElementById('hsTotalSub').textContent = buys.length + ' BUY / ' + sells.length + ' SELL';
+  document.getElementById('hsTotalSub').textContent = resolved.length > 0
+    ? wins + 'W / ' + losses + 'L (' + resolved.length + ' resolved)'
+    : buys.length + ' BUY / ' + sells.length + ' SELL';
   document.getElementById('hsBuy').textContent = buys.length;
   document.getElementById('hsSell').textContent = sells.length;
 
@@ -829,10 +836,20 @@ function renderHistoryTable(signals) {
   }
 
   tbody.innerHTML = actionable.map(s => {
-    const estPerTrade = estimatePnl([s]);
-    const pnlColor = estPerTrade >= 0 ? 'var(--green)' : 'var(--red)';
     const sess = (s.session || 'outside').replace('_session','').toUpperCase();
     const sessColor = sess === 'US' ? 'var(--green)' : sess === 'LONDON' ? '#4fc3f7' : 'var(--muted)';
+    let pnlDisplay, pnlColor;
+    if (s.outcome === 'WIN') {
+      pnlDisplay = fmtPnl(s.pnl || 0) + '<span class="est-badge" style="background:var(--green);color:#000">WIN</span>';
+      pnlColor = 'var(--green)';
+    } else if (s.outcome === 'LOSS') {
+      pnlDisplay = fmtPnl(s.pnl || 0) + '<span class="est-badge" style="background:var(--red);color:#fff">LOSS</span>';
+      pnlColor = 'var(--red)';
+    } else {
+      const estPerTrade = estimatePnl([s]);
+      pnlDisplay = fmtPnl(estPerTrade) + '<span class="est-badge">EST</span>';
+      pnlColor = estPerTrade >= 0 ? 'var(--green)' : 'var(--red)';
+    }
     return `<tr>
       <td style="color:var(--muted)">${fmtTime(s.logged_at)}</td>
       <td><span class="sig-badge ${s.signal}">${s.signal}</span></td>
@@ -843,7 +860,7 @@ function renderHistoryTable(signals) {
       <td style="color:${sessColor}">${sess}</td>
       <td style="color:${s.score >= 0 ? 'var(--green)' : 'var(--red)'}">${s.score >= 0 ? '+' : ''}${(s.score||0).toFixed(3)}</td>
       <td style="color:var(--text)">${(s.confidence||0).toFixed(1)}%</td>
-      <td style="color:${pnlColor};font-weight:600">${fmtPnl(estPerTrade)}<span class="est-badge">EST</span></td>
+      <td style="color:${pnlColor};font-weight:600">${pnlDisplay}</td>
     </tr>`;
   }).join('');
 }
