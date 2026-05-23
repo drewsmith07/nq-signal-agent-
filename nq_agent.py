@@ -389,7 +389,15 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     if ob_dir ==  1: final += 0.10 * ob_st
     if ob_dir == -1: final -= 0.10 * ob_st
 
-    if not (crossed_bull or crossed_bear) or window is None or in_event_window:
+    # MACD gate: allow signal on fresh cross OR sustained histogram (3+ candles same sign)
+    hist_sustained_bull = all(histogram.iloc[-(k+1)] > 0 for k in range(3))
+    hist_sustained_bear = all(histogram.iloc[-(k+1)] < 0 for k in range(3))
+    macd_ok = crossed_bull or crossed_bear or hist_sustained_bull or hist_sustained_bear
+
+    if crossed_bull: final += 0.08
+    elif crossed_bear: final -= 0.08
+
+    if not macd_ok or window is None or in_event_window:
         signal = "HOLD"
         final = 0.0
     else:
