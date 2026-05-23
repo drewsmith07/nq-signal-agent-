@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-NQ Futures Scalping Signal Agent - v3.1
+NQ Futures Scalping Signal Agent - v3.2
 Real-time data via ProjectX/TopstepX API — zero lag
 + Signal history logging (persists to signals_log.json)
 """
 
 import pandas as pd
+import threading
 import numpy as np
 import json
 import os
@@ -101,6 +102,83 @@ def _log_signal(result):
     _signal_history.append(entry)
     if len(_signal_history) > 500:
         _signal_history.pop(0)
+
+
+# ─── Outcome Tracker ──────────────────────────────────────────────────────────
+TP_POINTS = 60.0
+SL_POINTS = 20.0
+
+def _check_outcomes():
+    import pytz, time
+    pst = pytz.timezone('US/Pacific')
+    while True:
+        try:
+            sb = _get_supabase()
+            if sb:
+                open_signals = sb.table("nq_signals") \
+                    .select("id,signal,price,tp_price,sl_price,logged_at,contracts") \
+                    .is_("outcome", "null") \
+                    .in_("signal", ["BUY", "SELL"]) \
+                    .execute()
+                if open_signals.data:
+                    try:
+                        df = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+                        for sig in open_signals.data:
+                            try:
+                                sig_id = sig["id"]
+                                sig_type = sig["signal"]
+                                tp_price = float(sig["tp_price"])
+                                sl_price = float(sig["sl_price"])
+                                contracts = sig.get("contracts") or 1
+                                from datetime import timezone as tz
+                                logged_at = datetime.fromisoformat(sig["logged_at"])
+                                if logged_at.tzinfo is None:
+                                    logged_at = pst.localize(logged_at)
+                                logged_utc = logged_at.astimezone(tz.utc)
+                                recent = df[df.index > logged_utc]
+                                if recent.empty:
+                                    continue
+                                outcome = None
+                                pnl = None
+                                for _, candle in recent.iterrows():
+                                    high = float(candle["High"])
+                                    low = float(candle["Low"])
+                                    if sig_type == "BUY":
+                                        if low <= sl_price:
+                                            outcome = "LOSS"
+                                            pnl = round(-SL_POINTS * 20 * contracts, 2)
+                                            break
+                                        if high >= tp_price:
+                                            outcome = "WIN"
+                                            pnl = round(TP_POINTS * 20 * contracts, 2)
+                                            break
+                                    elif sig_type == "SELL":
+                                        if high >= sl_price:
+                                            outcome = "LOSS"
+                                            pnl = round(-SL_POINTS * 20 * contracts, 2)
+                                            break
+                                        if low <= tp_price:
+                                            outcome = "WIN"
+                                            pnl = round(TP_POINTS * 20 * contracts, 2)
+                                            break
+                                if outcome:
+                                    sb.table("nq_signals") \
+                                        .update({"outcome": outcome, "pnl": pnl}) \
+                                        .eq("id", sig_id) \
+                                        .execute()
+                                    print(f"[Outcome] {sig_type} #{sig_id} -> {outcome} | P&L: ${pnl}")
+                            except Exception as e:
+                                print(f"[Outcome] Error on signal {sig.get('id')}: {e}")
+                    except Exception as e:
+                        print(f"[Outcome] Bars error: {e}")
+        except Exception as e:
+            print(f"[Outcome] Thread error: {e}")
+        time.sleep(30)
+
+def _start_outcome_tracker():
+    t = threading.Thread(target=_check_outcomes, daemon=True)
+    t.start()
+    print("[Outcome] Background tracker started.")
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
@@ -627,58 +705,56 @@ Write 3-4 sentences explaining the signal in plain English."""
 @app.route('/history')
 def get_history():
     """
-    Returns logged signals.
+    Returns logged signals from Supabase — persists across deploys.
     Query params:
-      ?days=N       — last N days (default 3, max 30)
-      ?limit=N      — max entries to return (default 500)
-      ?signal=BUY   — filter by signal type (BUY | SELL | HOLD)
-      ?actionable=1 — only return BUY/SELL signals (excludes HOLD)
+      ?days=N       — last N days (default 7, max 90)
+      ?actionable=1 — only return BUY/SELL signals
     """
     try:
-        days    = min(int(request.args.get('days', 3)), 30)
-        limit   = min(int(request.args.get('limit', 500)), 5000)
-        sig_filter = request.args.get('signal', '').upper()
+        days       = min(int(request.args.get('days', 7)), 90)
         actionable = request.args.get('actionable', '0') == '1'
 
-        import pytz
-        pst = pytz.timezone('US/Pacific')
-        cutoff = datetime.now(pst) - timedelta(days=days)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-        filtered = []
-        for entry in reversed(_signal_history):
-            try:
-                ts = datetime.fromisoformat(entry['logged_at'])
-                if ts.tzinfo is None:
-                    ts = pst.localize(ts)
-                if ts < cutoff:
-                    continue
-            except:
-                continue
+        sb = _get_supabase()
+        if not sb:
+            return jsonify({"error": "Supabase not configured"}), 500
 
-            if sig_filter and entry.get('signal') != sig_filter:
-                continue
-            if actionable and entry.get('signal') == 'HOLD':
-                continue
+        query = sb.table("nq_signals") \
+            .select("*") \
+            .gte("logged_at", cutoff) \
+            .order("logged_at", desc=True) \
+            .limit(500)
 
-            filtered.append(entry)
-            if len(filtered) >= limit:
-                break
+        if actionable:
+            query = query.in_("signal", ["BUY", "SELL"])
 
-        # Summary stats for BUY/SELL signals in the window
+        result = query.execute()
+        filtered = result.data or []
+
         actionable_signals = [e for e in filtered if e.get('signal') in ('BUY', 'SELL')]
         buy_count  = sum(1 for e in actionable_signals if e['signal'] == 'BUY')
         sell_count = sum(1 for e in actionable_signals if e['signal'] == 'SELL')
         hold_count = sum(1 for e in filtered if e['signal'] == 'HOLD')
 
+        resolved   = [e for e in actionable_signals if e.get('outcome') in ('WIN', 'LOSS')]
+        real_pnl   = sum(e.get('pnl', 0) or 0 for e in resolved)
+        win_count  = sum(1 for e in resolved if e['outcome'] == 'WIN')
+        loss_count = sum(1 for e in resolved if e['outcome'] == 'LOSS')
+
         return jsonify({
             "count": len(filtered),
             "days_requested": days,
             "summary": {
-                "total_signals": len(filtered),
-                "actionable":    len(actionable_signals),
-                "buy":           buy_count,
-                "sell":          sell_count,
-                "hold":          hold_count,
+                "total_signals":  len(filtered),
+                "actionable":     len(actionable_signals),
+                "buy":            buy_count,
+                "sell":           sell_count,
+                "hold":           hold_count,
+                "wins":           win_count,
+                "losses":         loss_count,
+                "real_pnl":       real_pnl,
+                "resolved_count": len(resolved),
             },
             "signals": filtered
         })
@@ -799,11 +875,12 @@ Keep responses under 5 sentences unless detail is needed. Be direct with trade a
 def health():
     return jsonify({
         "status": "ok",
-        "version": "3.1",
+        "version": "3.2",
         "data_source": "ProjectX/TopstepX",
         "history_count": len(_signal_history)
     })
 
 if __name__ == "__main__":
-    print("🚀 NQ Signal Agent v3.1 — Real-time ProjectX data + Signal History")
+    _start_outcome_tracker()
+    print("🚀 NQ Signal Agent v3.2 — Real-time ProjectX data + Signal History")
     app.run(host="0.0.0.0", port=8080, debug=False)
