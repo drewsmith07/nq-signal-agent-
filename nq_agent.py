@@ -765,7 +765,7 @@ Keep responses under 5 sentences unless detail is needed. Be direct with trade a
 
         import urllib.request
         payload = json_mod.dumps({
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-5",
             "max_tokens": 400,
             "system": system_prompt,
             "messages": messages
