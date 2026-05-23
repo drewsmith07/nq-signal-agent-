@@ -55,7 +55,7 @@ async function sendChat() {
   appendMessage('user', msg, time + ' PT');
   showTyping();
   try {
-    const res = await fetch('/chat', {
+    const res = await fetch('https://nq-signal-agent-production.up.railway.app/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ message: msg, history: chatHistory, position: getPositionContext() })
