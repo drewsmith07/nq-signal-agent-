@@ -13,12 +13,23 @@ import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from supabase import create_client, Client
 
 app = Flask(__name__)
 CORS(app)
 
+# ─── Supabase Config ──────────────────────────────────────────────────────────
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://hzifmrfgimhahmnhddwo.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+_supabase = None
+
+def _get_supabase():
+    global _supabase
+    if _supabase is None and SUPABASE_KEY:
+        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase
+
 # ─── Signal History ───────────────────────────────────────────────────────────
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
 _signal_history = []  # in-memory cache
 
 def _load_history():
@@ -45,50 +56,51 @@ def _save_history():
         print(f"[History] Failed to save log: {e}")
 
 def _log_signal(result):
-    """Append a signal to history and persist. Logs ALL signals including HOLD."""
+    """Log signal to Supabase + in-memory cache."""
     import pytz
     pst = pytz.timezone('US/Pacific')
     now_pst = datetime.now(pst).isoformat()
 
+    ind = result.get("indicators", {})
     entry = {
-        "logged_at":  now_pst,
-        "signal":     result.get("signal"),
-        "price":      result.get("price"),
-        "score":      result.get("score"),
-        "confidence": result.get("confidence"),
-        "session":    result.get("session"),
+        "logged_at":    now_pst,
+        "signal":       result.get("signal"),
+        "price":        result.get("price"),
+        "score":        result.get("score"),
+        "confidence":   result.get("confidence"),
+        "session":      result.get("session"),
         "event_window": result.get("event_window", False),
-        "contracts":  result.get("contracts", 0),
-        "tp_price":   result.get("tp_price"),
-        "sl_price":   result.get("sl_price"),
-        "tp_points":  result.get("tp_points"),
-        "sl_points":  result.get("sl_points"),
-        "indicators": {
-            "rsi":            result["indicators"].get("rsi"),
-            "macd_histogram": result["indicators"].get("macd_histogram"),
-            "bb_position":    result["indicators"].get("bb_position"),
-            "vwap":           result["indicators"].get("vwap"),
-            "atr":            result["indicators"].get("atr"),
-            "fvg_type":       result["indicators"].get("fvg_type"),
-            "ob_direction":   result["indicators"].get("ob_direction"),
-        },
+        "contracts":    result.get("contracts", 0),
+        "tp_price":     result.get("tp_price"),
+        "sl_price":     result.get("sl_price"),
+        "tp_points":    result.get("tp_points"),
+        "sl_points":    result.get("sl_points"),
+        "rsi":          ind.get("rsi"),
+        "macd_histogram": ind.get("macd_histogram"),
+        "bb_position":  ind.get("bb_position"),
+        "vwap":         ind.get("vwap"),
+        "atr":          ind.get("atr"),
+        "fvg_type":     ind.get("fvg_type"),
+        "ob_direction": ind.get("ob_direction"),
         "volume_ratio": result.get("volume", {}).get("ratio"),
-        "reasons":    result.get("reasons", []),
-        # outcome fields — to be filled in later when history tab is built
-        "result":     None,   # "TP_HIT" | "SL_HIT" | "OPEN" | "EXPIRED"
-        "pnl":        None,   # dollar P&L once outcome is known
+        "reasons":      json.dumps(result.get("reasons", [])),
+        "outcome":      None,
+        "pnl":          None,
     }
 
+    try:
+        sb = _get_supabase()
+        if sb:
+            sb.table("nq_signals").insert(entry).execute()
+            print(f"[Supabase] Logged: {entry['signal']} @ {entry['price']}")
+        else:
+            print("[Supabase] No client — check SUPABASE_KEY env var")
+    except Exception as e:
+        print(f"[Supabase] Failed: {e}")
+
     _signal_history.append(entry)
-
-    # Keep last 5000 entries to prevent unbounded growth
-    if len(_signal_history) > 5000:
+    if len(_signal_history) > 500:
         _signal_history.pop(0)
-
-    _save_history()
-
-# Load history on startup
-_load_history()
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
