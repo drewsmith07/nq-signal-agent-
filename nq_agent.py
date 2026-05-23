@@ -505,7 +505,7 @@ def send_retell_call(signal, entry, tp, sl, contracts):
             }
         }
         headers = {
-            "Authorization": "Bearer key_65b4386d7c101f08438cbb68c09f",
+            "Authorization": "Bearer key_a21bca454a3cd876862e6b391ac3",
             "Content-Type": "application/json"
         }
         r = requests.post("https://api.retellai.com/v2/create-phone-call", json=payload, headers=headers, timeout=10)
