@@ -664,14 +664,16 @@ def get_signal():
         else:
             df_main = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
 
-        df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
-        df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+        df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
+        df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
         df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
 
         if df_5m.empty:
             return jsonify({"error": "No data returned"}), 500
 
         result = generate_signal(df_5m, df_1h, df_1m)
+        if result is None:
+            return jsonify({"error": "Not enough bars to generate signal", "bars_5m": len(df_5m)}), 500
         new_sig = result["signal"]
         new_ts  = result["timestamp"]
 
@@ -718,8 +720,8 @@ def get_commentary():
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             return jsonify({"commentary": "API key not configured."})
-        df_5m = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
-        df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+        df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
+        df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
         df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
         result = generate_signal(df_5m, df_1h, df_1m)
         sig = result["signal"]; price = result["price"]; conf = result["confidence"]
