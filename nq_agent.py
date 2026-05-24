@@ -205,8 +205,13 @@ def get_front_month_contract():
         print(f'[ProjectX] Contract search response: {resp}')
         contracts = resp.get('contracts', [])
         if contracts:
-            # Pick first active contract
-            _nq_contract = contracts[0]['id']
+            # Pick the contract with the latest expiry (front month that isn't expired)
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            future = [c for c in contracts if c.get('activeContract', False)]
+            # Sort by name descending to get latest month code (U > M)
+            future.sort(key=lambda c: c.get('name', ''), reverse=True)
+            _nq_contract = future[0]['id'] if future else contracts[0]['id']
             print(f'[ProjectX] Auto-resolved contract: {_nq_contract}')
             return _nq_contract
     except Exception as e:
