@@ -201,7 +201,9 @@ def get_front_month_contract():
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
         r = requests.post(f'{PX_BASE_URL}/Contract/search', headers=headers,
             json={'searchText': 'ENQ', 'live': False}, timeout=10)
-        contracts = r.json().get('contracts', [])
+        resp = r.json()
+        print(f'[ProjectX] Contract search response: {resp}')
+        contracts = resp.get('contracts', [])
         if contracts:
             # Pick first active contract
             _nq_contract = contracts[0]['id']
