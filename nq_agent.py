@@ -186,10 +186,31 @@ def _start_outcome_tracker():
 PX_USERNAME = 'drewksmith602@gmail.com'
 PX_API_KEY  = '2AEN4l/nMCiRnnJXOZRed3kjOWfczuszBKZogj+1njM='
 PX_BASE_URL = 'https://api.topstepx.com/api'
-NQ_CONTRACT = 'CON.F.US.ENQ.U26'  # Front month NQ — update on rollover
+NQ_CONTRACT = 'CON.F.US.ENQ.U26'  # fallback, auto-resolved on startup
 
 _px_token = None
 _px_token_expiry = None
+_nq_contract = None
+
+def get_front_month_contract():
+    global _nq_contract
+    if _nq_contract:
+        return _nq_contract
+    try:
+        token = get_px_token()
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        r = requests.post(f'{PX_BASE_URL}/Contract/search', headers=headers,
+            json={'searchText': 'ENQ', 'live': False}, timeout=10)
+        contracts = r.json().get('contracts', [])
+        if contracts:
+            # Pick first active contract
+            _nq_contract = contracts[0]['id']
+            print(f'[ProjectX] Auto-resolved contract: {_nq_contract}')
+            return _nq_contract
+    except Exception as e:
+        print(f'[ProjectX] Contract search failed: {e}')
+    _nq_contract = NQ_CONTRACT
+    return NQ_CONTRACT
 
 def get_px_token():
     global _px_token, _px_token_expiry
@@ -216,7 +237,7 @@ def get_nq_bars(interval_minutes=5, lookback_days=2, limit=300):
     end = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     r = requests.post(f'{PX_BASE_URL}/History/retrieveBars', headers=headers,
         json={
-            'contractId': NQ_CONTRACT,
+            'contractId': get_front_month_contract(),
             'live': False,
             'startTime': start,
             'endTime': end,
