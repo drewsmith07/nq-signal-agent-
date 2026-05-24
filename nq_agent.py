@@ -184,7 +184,7 @@ def _start_outcome_tracker():
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
-PX_API_KEY  = 'TX3KKsllr69YaSrdTftiaj/Ew6tGQ5cUzG9cTD7GgOM='
+PX_API_KEY  = '2AEN4l/nMCiRnnJXOZRed3kjOWfczuszBKZogj+1njM='
 PX_BASE_URL = 'https://api.topstepx.com/api'
 NQ_CONTRACT = 'CON.F.US.ENQ.U26'  # Front month NQ — update on rollover
 
