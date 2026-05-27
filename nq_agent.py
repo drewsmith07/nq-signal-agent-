@@ -124,7 +124,7 @@ def _check_outcomes():
                     .execute()
                 if open_signals.data:
                     try:
-                        df = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+                        df = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
                         for sig in open_signals.data:
                             try:
                                 sig_id = sig["id"]
@@ -666,7 +666,7 @@ def get_signal():
 
         df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
         df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
-        df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+        df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
 
         if df_5m.empty:
             return jsonify({"error": "No data returned"}), 500
@@ -722,7 +722,7 @@ def get_commentary():
             return jsonify({"commentary": "API key not configured."})
         df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
         df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
-        df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+        df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
         result = generate_signal(df_5m, df_1h, df_1m)
         sig = result["signal"]; price = result["price"]; conf = result["confidence"]
         score = result["score"]; ind = result["indicators"]
@@ -826,9 +826,9 @@ def chat():
 
         # Pull live market data
         try:
-            df_5m = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
+            df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
             df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
-            df_1m = get_nq_bars(interval_minutes=1, lookback_days=1, limit=200)
+            df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
             market = generate_signal(df_5m, df_1h, df_1m)
             market_context = f"""
 LIVE MARKET DATA (as of right now):
