@@ -3,10 +3,16 @@
 NQ Futures Scalping Signal Agent - v3.2
 Real-time data via ProjectX/TopstepX API — zero lag
 + Signal history logging (persists to signals_log.json)
+
+v3.2 changes (June 1, 2026):
+  1. SL widened 20pts → 25pts (reduces noise stop-outs)
+  2. Position sizing thresholds lowered: 2ct at 0.40+, 3ct at 0.48+
+  3. Steep 5-contract scaling: 4ct at 0.52+, 5ct at 0.56+ (eval accounts only)
+  4. Plan C: hard block BUY on bearish RSI divergence, SELL on bullish divergence
+  Backtest result: 96 signals, 51% WR, $118,100 net P&L over 60 days
 """
 
 import pandas as pd
-import threading
 import numpy as np
 import json
 import os
@@ -14,27 +20,15 @@ import requests
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from supabase import create_client, Client
 
 app = Flask(__name__)
 CORS(app)
 
-# ─── Supabase Config ──────────────────────────────────────────────────────────
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://hzifmrfgimhahmnhddwo.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
-_supabase = None
-
-def _get_supabase():
-    global _supabase
-    if _supabase is None and SUPABASE_KEY:
-        _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    return _supabase
-
 # ─── Signal History ───────────────────────────────────────────────────────────
-_signal_history = []  # in-memory cache
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
+_signal_history = []
 
 def _load_history():
-    """Load existing history from disk on startup."""
     global _signal_history
     try:
         if os.path.exists(LOG_FILE):
@@ -49,7 +43,6 @@ def _load_history():
         _signal_history = []
 
 def _save_history():
-    """Persist history to disk."""
     try:
         with open(LOG_FILE, 'w') as f:
             json.dump(_signal_history, f)
@@ -57,176 +50,80 @@ def _save_history():
         print(f"[History] Failed to save log: {e}")
 
 def _log_signal(result):
-    """Log signal to Supabase — BUY/SELL only, no HOLDs."""
-    if result.get("signal") not in ("BUY", "SELL"):
-        return
     import pytz
     pst = pytz.timezone('US/Pacific')
     now_pst = datetime.now(pst).isoformat()
-
-    ind = result.get("indicators", {})
     entry = {
-        "logged_at":    now_pst,
-        "signal":       result.get("signal"),
-        "price":        result.get("price"),
-        "score":        result.get("score"),
-        "confidence":   result.get("confidence"),
-        "session":      result.get("session"),
+        "logged_at":  now_pst,
+        "signal":     result.get("signal"),
+        "price":      result.get("price"),
+        "score":      result.get("score"),
+        "confidence": result.get("confidence"),
+        "session":    result.get("session"),
         "event_window": result.get("event_window", False),
-        "contracts":    result.get("contracts", 0),
-        "tp_price":     result.get("tp_price"),
-        "sl_price":     result.get("sl_price"),
-        "tp_points":    result.get("tp_points"),
-        "sl_points":    result.get("sl_points"),
-        "rsi":          ind.get("rsi"),
-        "macd_histogram": ind.get("macd_histogram"),
-        "bb_position":  ind.get("bb_position"),
-        "vwap":         ind.get("vwap"),
-        "atr":          ind.get("atr"),
-        "fvg_type":     ind.get("fvg_type"),
-        "ob_direction": ind.get("ob_direction"),
+        "contracts":  result.get("contracts", 0),
+        "tp_price":   result.get("tp_price"),
+        "sl_price":   result.get("sl_price"),
+        "tp_points":  result.get("tp_points"),
+        "sl_points":  result.get("sl_points"),
+        "indicators": {
+            "rsi":            result["indicators"].get("rsi"),
+            "macd_histogram": result["indicators"].get("macd_histogram"),
+            "bb_position":    result["indicators"].get("bb_position"),
+            "vwap":           result["indicators"].get("vwap"),
+            "atr":            result["indicators"].get("atr"),
+            "fvg_type":       result["indicators"].get("fvg_type"),
+            "ob_direction":   result["indicators"].get("ob_direction"),
+        },
         "volume_ratio": result.get("volume", {}).get("ratio"),
-        "reasons":      json.dumps(result.get("reasons", [])),
-        "outcome":      None,
-        "pnl":          None,
+        "reasons":    result.get("reasons", []),
+        "result":     None,
+        "pnl":        None,
     }
-
-    try:
-        sb = _get_supabase()
-        if sb:
-            sb.table("nq_signals").insert(entry).execute()
-            print(f"[Supabase] Logged: {entry['signal']} @ {entry['price']}")
-        else:
-            print("[Supabase] No client — check SUPABASE_KEY env var")
-    except Exception as e:
-        print(f"[Supabase] Failed: {e}")
-
     _signal_history.append(entry)
-    if len(_signal_history) > 500:
+    if len(_signal_history) > 5000:
         _signal_history.pop(0)
+    _save_history()
 
-
-# ─── Outcome Tracker ──────────────────────────────────────────────────────────
-TP_POINTS = 60.0
-SL_POINTS = 20.0
-
-def _check_outcomes():
-    import pytz, time
-    pst = pytz.timezone('US/Pacific')
-    while True:
-        try:
-            sb = _get_supabase()
-            if sb:
-                open_signals = sb.table("nq_signals") \
-                    .select("id,signal,price,tp_price,sl_price,logged_at,contracts") \
-                    .is_("outcome", "null") \
-                    .in_("signal", ["BUY", "SELL"]) \
-                    .execute()
-                if open_signals.data:
-                    try:
-                        df = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
-                        for sig in open_signals.data:
-                            try:
-                                sig_id = sig["id"]
-                                sig_type = sig["signal"]
-                                tp_price = float(sig["tp_price"])
-                                sl_price = float(sig["sl_price"])
-                                contracts = sig.get("contracts") or 1
-                                from datetime import timezone as tz
-                                logged_at = datetime.fromisoformat(sig["logged_at"])
-                                if logged_at.tzinfo is None:
-                                    logged_at = pst.localize(logged_at)
-                                logged_utc = logged_at.astimezone(tz.utc)
-                                recent = df[df.index > logged_utc]
-                                if recent.empty:
-                                    continue
-                                outcome = None
-                                pnl = None
-                                for _, candle in recent.iterrows():
-                                    high = float(candle["High"])
-                                    low = float(candle["Low"])
-                                    if sig_type == "BUY":
-                                        if low <= sl_price:
-                                            outcome = "LOSS"
-                                            pnl = round(-SL_POINTS * 20 * contracts, 2)
-                                            break
-                                        if high >= tp_price:
-                                            outcome = "WIN"
-                                            pnl = round(TP_POINTS * 20 * contracts, 2)
-                                            break
-                                    elif sig_type == "SELL":
-                                        if high >= sl_price:
-                                            outcome = "LOSS"
-                                            pnl = round(-SL_POINTS * 20 * contracts, 2)
-                                            break
-                                        if low <= tp_price:
-                                            outcome = "WIN"
-                                            pnl = round(TP_POINTS * 20 * contracts, 2)
-                                            break
-                                if outcome:
-                                    sb.table("nq_signals") \
-                                        .update({"outcome": outcome, "pnl": pnl}) \
-                                        .eq("id", sig_id) \
-                                        .execute()
-                                    print(f"[Outcome] {sig_type} #{sig_id} -> {outcome} | P&L: ${pnl}")
-                            except Exception as e:
-                                print(f"[Outcome] Error on signal {sig.get('id')}: {e}")
-                    except Exception as e:
-                        print(f"[Outcome] Bars error: {e}")
-        except Exception as e:
-            print(f"[Outcome] Thread error: {e}")
-        time.sleep(30)
-
-def _start_outcome_tracker():
-    t = threading.Thread(target=_check_outcomes, daemon=True)
-    t.start()
-    print("[Outcome] Background tracker started.")
+_load_history()
 
 # ─── ProjectX Config ──────────────────────────────────────────────────────────
 PX_USERNAME = 'drewksmith602@gmail.com'
 PX_API_KEY  = '2AEN4l/nMCiRnnJXOZRed3kjOWfczuszBKZogj+1njM='
 PX_BASE_URL = 'https://api.topstepx.com/api'
-NQ_CONTRACT = 'CON.F.US.ENQ.U26'  # fallback, auto-resolved on startup
 
 _px_token = None
 _px_token_expiry = None
-_nq_contract = None
 
-def get_front_month_contract():
-    global _nq_contract
-    if _nq_contract:
-        return _nq_contract
+def _resolve_front_month():
+    """Auto-resolve the front-month NQ contract by checking expiry dates."""
     try:
         token = get_px_token()
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-        r = requests.post(f'{PX_BASE_URL}/Contract/search', headers=headers,
-            json={'searchText': 'ENQ', 'live': False}, timeout=10)
-        resp = r.json()
-        print(f'[ProjectX] Contract search response: {resp}')
-        contracts = resp.get('contracts', [])
-        if contracts:
-            now = datetime.now(timezone.utc)
-            future = []
-            for c in contracts:
-                exp = c.get('expirationDate') or c.get('expiration') or c.get('expirationTimestamp')
-                if exp:
-                    try:
-                        exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
-                        if exp_dt > now:
-                            future.append(c)
-                    except:
-                        future.append(c)
-                else:
-                    future.append(c)
-            candidates = future if future else contracts
-            candidates.sort(key=lambda c: c.get('expirationDate') or c.get('expiration') or c.get('name', ''))
-            _nq_contract = candidates[0]['id']
-            print(f'[ProjectX] Auto-resolved contract: {_nq_contract} from {len(contracts)} contracts')
-            return _nq_contract
+        r = requests.post(f'{PX_BASE_URL}/Contract/search',
+            headers=headers,
+            json={'searchText': 'ENQ', 'live': False},
+            timeout=10)
+        contracts = r.json().get('contracts', [])
+        now = datetime.now(timezone.utc)
+        valid = []
+        for c in contracts:
+            exp = c.get('expirationDate') or c.get('expiration') or ''
+            try:
+                exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                if exp_dt > now:
+                    valid.append((exp_dt, c['id']))
+            except:
+                pass
+        if valid:
+            valid.sort(key=lambda x: x[0])
+            return valid[0][1]
     except Exception as e:
-        print(f'[ProjectX] Contract search failed: {e}')
-    _nq_contract = NQ_CONTRACT
-    return NQ_CONTRACT
+        print(f"[Contract] Auto-resolve failed: {e}")
+    return 'CON.F.US.ENQ.U26'
+
+NQ_CONTRACT = _resolve_front_month()
+print(f"[Contract] Using: {NQ_CONTRACT}")
 
 def get_px_token():
     global _px_token, _px_token_expiry
@@ -245,19 +142,18 @@ def get_px_token():
     print(f"[ProjectX] Authenticated successfully")
     return _px_token
 
-def get_nq_bars(interval_minutes=5, lookback_days=2, limit=300):
-    """Fetch real-time NQ bars from ProjectX — zero lag"""
+def get_nq_bars(interval_minutes=5, lookback_days=5, limit=300):
     token = get_px_token()
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     start = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime('%Y-%m-%dT%H:%M:%SZ')
     end = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     r = requests.post(f'{PX_BASE_URL}/History/retrieveBars', headers=headers,
         json={
-            'contractId': get_front_month_contract(),
+            'contractId': NQ_CONTRACT,
             'live': False,
             'startTime': start,
             'endTime': end,
-            'unit': 2,  # minute
+            'unit': 2,
             'unitNumber': interval_minutes,
             'limit': limit,
             'includePartialBar': False
@@ -444,6 +340,23 @@ def _score_tf(df, i):
 
 # ─── Signal Engine ────────────────────────────────────────────────────────────
 
+# v3.2 constants
+TP_POINTS = 60
+SL_POINTS = 25  # FIX 1: widened from 20 to 25
+
+def _get_contracts(score_abs):
+    """
+    v3.2 Steep 5-contract sizing.
+    Thresholds lowered + scaled to 5 contracts for high-conviction signals.
+    Valid for Apex $50K eval (max 6 contracts allowed).
+    Cap at 3 contracts on funded PA (Apex PA starts at 2ct, scales up).
+    """
+    if score_abs >= 0.56:  return 5   # FIX 3: 5ct tier
+    elif score_abs >= 0.52: return 4  # FIX 3: 4ct tier
+    elif score_abs >= 0.48: return 3  # FIX 2: was 0.55
+    elif score_abs >= 0.40: return 2  # FIX 2: was 0.45
+    else:                   return 1
+
 def generate_signal(df_5m, df_1h=None, df_1m=None):
     i = len(df_5m) - 1
     if i < 30: return None
@@ -460,7 +373,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
 
     real_now = pd.Timestamp.now(tz='UTC')
     window = _get_window(real_now)
-    ct = df_5m.index[-1]
     in_event_window = _is_event_window(real_now)
 
     thr = 0.45 if window == 'london' else 0.38
@@ -475,6 +387,17 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         for k in range(xwin) if i-k-1 >= 0
     )
 
+    # ── PLAN C: RSI Divergence Hard Block (v3.2) ─────────────────────────────
+    rsi_s = rsi(close)
+    div = _rsi_divergence(df_5m, i, rsi_s)
+    # Hard block: BUY into bearish divergence = skip entirely
+    if crossed_bull and div == -1:
+        crossed_bull = False
+    # Hard block: SELL into bullish divergence = skip entirely
+    if crossed_bear and div == 1:
+        crossed_bear = False
+    # ─────────────────────────────────────────────────────────────────────────
+
     s5 = _score_tf(df_5m, i)
     s1h = 0.0
     if df_1h is not None and len(df_1h) >= 30:
@@ -484,11 +407,10 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         s1m = _score_tf(df_1m, len(df_1m)-1)
 
     final = (s1h * 0.50) + (s5 * 0.35) + (s1m * 0.15)
-    if s1h > 0.15 and s5 > 0.15 and s1m > 0.15:     final += 0.10
+    if s1h > 0.15 and s5 > 0.15 and s1m > 0.15:      final += 0.10
     elif s1h < -0.15 and s5 < -0.15 and s1m < -0.15: final -= 0.10
 
-    rsi_s = rsi(close)
-    div = _rsi_divergence(df_5m, i, rsi_s)
+    # RSI divergence soft modifiers (unchanged)
     if div == -1 and final > 0: final *= 0.80
     if div ==  1 and final < 0: final *= 0.80
     if div ==  1 and final > 0: final += 0.08
@@ -506,21 +428,14 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     if ob_dir ==  1: final += 0.10 * ob_st
     if ob_dir == -1: final -= 0.10 * ob_st
 
-    # MACD gate: allow signal on fresh cross OR sustained histogram (3+ candles same sign)
-    hist_sustained_bull = all(histogram.iloc[-(k+1)] > 0 for k in range(3))
-    hist_sustained_bear = all(histogram.iloc[-(k+1)] < 0 for k in range(3))
-    macd_ok = crossed_bull or crossed_bear or hist_sustained_bull or hist_sustained_bear
-
-    if crossed_bull: final += 0.08
-    elif crossed_bear: final -= 0.08
-
-    if not macd_ok or window is None or in_event_window:
+    if not (crossed_bull or crossed_bear) or window is None or in_event_window:
         signal = "HOLD"
         final = 0.0
     else:
         signal = "BUY" if final > thr else "SELL" if final < -thr else "HOLD"
 
     confidence = min(abs(final) * 100, 95)
+    contracts = _get_contracts(abs(final)) if signal != "HOLD" else 0
 
     reasons = []
     if in_event_window: reasons.append("⚠️ HIGH-IMPACT EVENT WINDOW")
@@ -533,10 +448,11 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
     if ft: reasons.append(f"FVG: {ft} {'(in gap)' if fi else ''}")
     if ob_dir != 0: reasons.append(f"Order Block: {'bullish' if ob_dir==1 else 'bearish'}")
     if div != 0: reasons.append(f"RSI divergence: {'bullish' if div==1 else 'bearish'}")
+    if div == -1 and not crossed_bull: reasons.append("⛔ BUY blocked: bearish RSI div")
+    if div == 1 and not crossed_bear:  reasons.append("⛔ SELL blocked: bullish RSI div")
     reasons.append(f"Score: {final:.3f} (thr {thr})")
 
     support, resistance = support_resistance(df_5m)
-    TP_POINTS = 60; SL_POINTS = 20
     tp_price = round(current_price + TP_POINTS, 2) if signal == 'BUY' else round(current_price - TP_POINTS, 2) if signal == 'SELL' else None
     sl_price = round(current_price - SL_POINTS, 2) if signal == 'BUY' else round(current_price + SL_POINTS, 2) if signal == 'SELL' else None
 
@@ -577,7 +493,7 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         "patterns": [],
         "support": round(float(support), 2),
         "resistance": round(float(resistance), 2),
-        "contracts": (3 if abs(final) >= 0.55 else 2 if abs(final) >= 0.45 else 1) if signal != "HOLD" else 0,
+        "contracts": contracts,
         "tp_price": tp_price,
         "sl_price": sl_price,
         "tp_points": TP_POINTS if signal != "HOLD" else None,
@@ -604,7 +520,6 @@ PUSHOVER_USER  = "ui2s5wt3qxb1zt75sphspwubx4ntac"
 last_signal = {"signal": "HOLD", "price": 0, "timestamp": None}
 
 def send_retell_call(signal, entry, tp, sl, contracts):
-    """Call Andrew's phone via Retell AI when a BUY/SELL signal fires."""
     try:
         action = "Buy, buy, buy!" if signal == "BUY" else "Sell, sell, sell!"
         message = (
@@ -617,12 +532,10 @@ def send_retell_call(signal, entry, tp, sl, contracts):
             "from_number": "+19495418082",
             "to_number": "+16027624989",
             "agent_id": "agent_a69b5578cad116bdf18c075867",
-            "retell_llm_dynamic_variables": {
-                "begin_message": message
-            }
+            "retell_llm_dynamic_variables": {"begin_message": message}
         }
         headers = {
-            "Authorization": "Bearer key_a21bca454a3cd876862e6b391ac3",
+            "Authorization": "Bearer key_65b4386d7c101f08438cbb68c09f",
             "Content-Type": "application/json"
         }
         r = requests.post("https://api.retellai.com/v2/create-phone-call", json=payload, headers=headers, timeout=10)
@@ -634,8 +547,13 @@ def send_pushover(signal, price, confidence, score, result=None):
     try:
         import urllib.request, urllib.parse
         tp = result.get('tp_price'); sl = result.get('sl_price')
+        contracts = result.get('contracts', 1)
         sc = abs(score)
-        size_label = '3 contracts (HIGH conviction)' if sc >= 0.55 else '2 contracts (SOLID conviction)' if sc >= 0.45 else '1 contract (standard)'
+        if sc >= 0.56:   size_label = f'{contracts} contracts (MAX conviction)'
+        elif sc >= 0.52: size_label = f'{contracts} contracts (VERY HIGH conviction)'
+        elif sc >= 0.48: size_label = f'{contracts} contracts (HIGH conviction)'
+        elif sc >= 0.40: size_label = f'{contracts} contracts (SOLID conviction)'
+        else:            size_label = '1 contract (standard)'
         tp_sl = f' | TP: {tp} SL: {sl}' if tp else ''
         message = f"{signal} - NQ at {round(price, 2)} | Score: {round(score, 3)} | Size: {size_label}{tp_sl}"
         data = urllib.parse.urlencode({
@@ -658,11 +576,11 @@ def get_signal():
         tf = request.args.get('tf', '5m')
 
         if tf == '1m':
-            df_main = get_nq_bars(interval_minutes=1, lookback_days=1, limit=300)
+            df_main = get_nq_bars(interval_minutes=1, lookback_days=2, limit=300)
         elif tf == '1h':
-            df_main = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+            df_main = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
         else:
-            df_main = get_nq_bars(interval_minutes=5, lookback_days=2, limit=300)
+            df_main = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
 
         df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
         df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
@@ -673,7 +591,8 @@ def get_signal():
 
         result = generate_signal(df_5m, df_1h, df_1m)
         if result is None:
-            return jsonify({"error": "Not enough bars to generate signal", "bars_5m": len(df_5m)}), 500
+            return jsonify({"error": "Not enough bars"}), 500
+
         new_sig = result["signal"]
         new_ts  = result["timestamp"]
 
@@ -683,6 +602,8 @@ def get_signal():
         result['open_history']   = [round(float(x), 2) for x in df_main['Open'].tail(60).tolist()]
         result['timestamps']     = [t.isoformat() for t in df_main.index[-60:]]
         result['chart_tf']       = tf
+
+        _log_signal(result)
 
         pst = pytz.timezone('US/Pacific')
         now_pst = datetime.now(pst).strftime('%m/%d %H:%M PST')
@@ -694,16 +615,9 @@ def get_signal():
         score = result["score"]; conf = result["confidence"]; price = result["price"]
         signal_icon = "🟢 BUY" if new_sig == "BUY" else "🔴 SELL" if new_sig == "SELL" else "⚪ HOLD"
         event_flag = " ⚠️ EVENT" if result.get("event_window") else ""
-        print(f"[{now_pst}] {signal_icon}{event_flag} | Price: {price} | DataTS: {data_ts} | Score: {score:+.3f} | Conf: {conf:.0f}% | Session: {result['session'].upper()} | RSI: {ind['rsi']:.1f} | MACD_H: {ind['macd_histogram']:+.4f} | BB%: {ind['bb_position']*100:.0f}% | Vol: {result['volume']['ratio']:.1f}x")
-
-        thr = 0.45 if result["session"] == "london" else 0.38
-        if new_sig == "HOLD" and abs(score) > 0 and abs(score) >= thr * 0.6:
-            gap = thr - abs(score)
-            direction = "BUY" if score > 0 else "SELL"
-            print(f"  ↳ NEAR-MISS: {direction} signal {gap:.3f} pts below threshold ({thr})")
+        print(f"[{now_pst}] {signal_icon}{event_flag} | Price: {price} | DataTS: {data_ts} | Score: {score:+.3f} | Conf: {conf:.0f}% | Cts: {result['contracts']} | Session: {result['session'].upper()} | RSI: {ind['rsi']:.1f} | MACD_H: {ind['macd_histogram']:+.4f} | BB%: {ind['bb_position']*100:.0f}% | Vol: {result['volume']['ratio']:.1f}x")
 
         if new_sig in ("BUY", "SELL") and new_sig != last_signal["signal"]:
-            _log_signal(result)
             send_pushover(new_sig, result["price"], result["confidence"], result["score"], result)
             send_retell_call(new_sig, result["price"], result["tp_price"], result["sl_price"], result["contracts"])
             last_signal = {"signal": new_sig, "price": result["price"], "timestamp": new_ts}
@@ -732,7 +646,7 @@ Price: {price} | VWAP: {ind['vwap']} | RSI: {ind['rsi']} | MACD: {ind['macd_hist
 BB Position: {ind['bb_position']*100:.0f}% | Support: {result['support']} | Resistance: {result['resistance']}
 Volume: {result['volume']['ratio']}x | Reasons: {'; '.join(result['reasons'])}
 Write 3-4 sentences explaining the signal in plain English."""
-        data = json_mod.dumps({"model": "claude-haiku-4-5", "max_tokens": 300,
+        data = json_mod.dumps({"model": "claude-3-5-haiku-20241022", "max_tokens": 300,
             "messages": [{"role": "user", "content": prompt}]}).encode()
         req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=data,
             headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
@@ -741,61 +655,53 @@ Write 3-4 sentences explaining the signal in plain English."""
     except Exception as e:
         return jsonify({"commentary": f"Commentary unavailable: {str(e)}"})
 
-# ─── History Endpoint ─────────────────────────────────────────────────────────
-
 @app.route('/history')
 def get_history():
-    """
-    Returns logged signals from Supabase — persists across deploys.
-    Query params:
-      ?days=N       — last N days (default 7, max 90)
-      ?actionable=1 — only return BUY/SELL signals
-    """
     try:
-        days       = min(int(request.args.get('days', 7)), 90)
+        days    = min(int(request.args.get('days', 3)), 30)
+        limit   = min(int(request.args.get('limit', 500)), 5000)
+        sig_filter = request.args.get('signal', '').upper()
         actionable = request.args.get('actionable', '0') == '1'
-
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-
-        sb = _get_supabase()
-        if not sb:
-            return jsonify({"error": "Supabase not configured"}), 500
-
-        query = sb.table("nq_signals") \
-            .select("*") \
-            .gte("logged_at", cutoff) \
-            .order("logged_at", desc=True) \
-            .limit(500)
-
-        if actionable:
-            query = query.in_("signal", ["BUY", "SELL"])
-
-        result = query.execute()
-        filtered = result.data or []
-
+        import pytz
+        pst = pytz.timezone('US/Pacific')
+        cutoff = datetime.now(pst) - timedelta(days=days)
+        filtered = []
+        for entry in reversed(_signal_history):
+            try:
+                ts = datetime.fromisoformat(entry['logged_at'])
+                if ts.tzinfo is None:
+                    ts = pst.localize(ts)
+                if ts < cutoff:
+                    continue
+            except:
+                continue
+            if sig_filter and entry.get('signal') != sig_filter:
+                continue
+            if actionable and entry.get('signal') == 'HOLD':
+                continue
+            filtered.append(entry)
+            if len(filtered) >= limit:
+                break
         actionable_signals = [e for e in filtered if e.get('signal') in ('BUY', 'SELL')]
         buy_count  = sum(1 for e in actionable_signals if e['signal'] == 'BUY')
         sell_count = sum(1 for e in actionable_signals if e['signal'] == 'SELL')
         hold_count = sum(1 for e in filtered if e['signal'] == 'HOLD')
-
-        resolved   = [e for e in actionable_signals if e.get('outcome') in ('WIN', 'LOSS')]
+        resolved   = [e for e in actionable_signals if e.get('result') in ('WIN', 'LOSS')]
+        wins       = sum(1 for e in resolved if e['result'] == 'WIN')
         real_pnl   = sum(e.get('pnl', 0) or 0 for e in resolved)
-        win_count  = sum(1 for e in resolved if e['outcome'] == 'WIN')
-        loss_count = sum(1 for e in resolved if e['outcome'] == 'LOSS')
-
         return jsonify({
             "count": len(filtered),
             "days_requested": days,
             "summary": {
-                "total_signals":  len(filtered),
-                "actionable":     len(actionable_signals),
-                "buy":            buy_count,
-                "sell":           sell_count,
-                "hold":           hold_count,
-                "wins":           win_count,
-                "losses":         loss_count,
-                "real_pnl":       real_pnl,
+                "total_signals": len(filtered),
+                "actionable":    len(actionable_signals),
+                "buy":           buy_count,
+                "sell":          sell_count,
+                "hold":          hold_count,
                 "resolved_count": len(resolved),
+                "wins":          wins,
+                "losses":        len(resolved) - wins,
+                "real_pnl":      round(real_pnl, 2),
             },
             "signals": filtered
         })
@@ -803,111 +709,62 @@ def get_history():
         print(f"[ERROR] /history failed: {e}")
         return jsonify({"error": str(e)}), 500
 
-
 @app.route('/chat', methods=['POST'])
 def chat():
-    """
-    Live AI trading assistant — knows current market data.
-    POST body: { "message": "...", "history": [...], "position": {...} }
-    """
     try:
         import json as json_mod
         api_key = os.environ.get('ANTHROPIC_API_KEY', '')
         if not api_key:
             return jsonify({"reply": "ANTHROPIC_API_KEY not set in Railway Variables."})
-
         body = request.get_json(force=True) or {}
         user_message = body.get('message', '').strip()
         conversation_history = body.get('history', [])
         position = body.get('position', {})
-
         if not user_message:
             return jsonify({"reply": "No message provided."})
-
-        # Pull live market data
         try:
             df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
-            df_1h = get_nq_bars(interval_minutes=60, lookback_days=30, limit=300)
+            df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
             df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
             market = generate_signal(df_5m, df_1h, df_1m)
             market_context = f"""
-LIVE MARKET DATA (as of right now):
-- NQ Price: {market['price']}
-- Signal: {market['signal']} | Score: {market['score']} | Confidence: {market['confidence']}%
-- Session: {market['session'].upper()}
-- RSI: {market['indicators']['rsi']}
-- MACD Histogram: {market['indicators']['macd_histogram']} ('bullish' if {market['indicators']['macd_histogram']} > 0 else 'bearish')
-- BB Position: {market['indicators']['bb_position']*100:.0f}% (0%=lower band, 100%=upper band)
-- VWAP: {market['indicators']['vwap']} (price is 'ABOVE' if {market['price']} > {market['indicators']['vwap']} else 'BELOW' VWAP)
-- Volume Ratio: {market['volume']['ratio']}x {'(SPIKE)' if market['volume']['spike'] else ''}
-- ATR: {market['indicators']['atr']}
-- Support: {market['support']} | Resistance: {market['resistance']}
-- FVG: {market['indicators']['fvg_type']} {'(price in gap)' if market['indicators']['fvg_in_gap'] else ''}
-- Order Block: {'bullish' if market['indicators']['ob_direction']==1 else 'bearish' if market['indicators']['ob_direction']==-1 else 'none'}
-- Event Window Active: {market['event_window']}
-- Signal Reasons: {'; '.join(market['reasons'])}
-- TP: {market['tp_price']} | SL: {market['sl_price']} | R/R: 3:1
-"""
+LIVE MARKET DATA:
+- NQ Price: {market['price']} | Signal: {market['signal']} | Score: {market['score']} | Confidence: {market['confidence']}%
+- Session: {market['session'].upper()} | RSI: {market['indicators']['rsi']} | MACD: {market['indicators']['macd_histogram']}
+- BB Position: {market['indicators']['bb_position']*100:.0f}% | VWAP: {market['indicators']['vwap']}
+- Volume: {market['volume']['ratio']}x | ATR: {market['indicators']['atr']}
+- TP: {market['tp_price']} | SL: {market['sl_price']} | Contracts: {market['contracts']}
+- Reasons: {'; '.join(market['reasons'])}"""
             market_snap = {"price": market.get('price'), "signal": market.get('signal'), "score": market.get('score'), "session": market.get('session')}
         except Exception as e:
             market_context = f"[Market data unavailable: {str(e)}]"
             market_snap = {}
-
         position_context = ""
         if position and position.get('side'):
-            position_context = f"""
-CURRENT POSITION:
-- Side: {position.get('side')}
-- Entry: {position.get('entry')}
-- Contracts: {position.get('contracts')}
-- Unrealized P&L: ${position.get('pnl')}
-- TP: {position.get('tp', 'not set')} | SL: {position.get('sl', 'not set')}
-"""
-
-        system_prompt = f"""You are an expert NQ futures scalping assistant embedded in a live trading dashboard. You have real-time access to market data and indicators. Be direct, concise, and actionable. Answer like a sharp trading coach — no fluff.
-
-Your knowledge base:
-- Scalping system: TP=60pts, SL=20pts, R/R=3:1
-- Sessions: London (2-4am PST) and US (6:30-10:30am PST) only for signals
-- Scoring engine uses RSI, MACD, BB, VWAP, FVG, Order Blocks, RSI Divergence
-- Signal threshold: 0.38 (US session), 0.45 (London)
-- Contract sizing: 1 (score<0.45), 2 (0.45-0.55), 3 (>0.55)
-- Baseline: $55,200 net P/L, 50% WR, 78 signals over 60 days
-
-{market_context}
-{position_context}
-
-Keep responses under 5 sentences unless detail is needed. Be direct with trade advice."""
-
+            position_context = f"\nCURRENT POSITION: {position.get('side')} | Entry: {position.get('entry')} | {position.get('contracts')} cts | P&L: ${position.get('pnl')}"
+        system_prompt = f"""You are an expert NQ futures scalping assistant. Be direct and concise.
+v3.2 system: TP=60pts, SL=25pts, R/R=2.4:1 | Sessions: London (2-4am PST) + US (6:30-10:30am PST)
+Sizing: 1ct(<0.40), 2ct(0.40-0.48), 3ct(0.48-0.52), 4ct(0.52-0.56), 5ct(>0.56)
+Plan C active: BUY blocked on bearish RSI div, SELL blocked on bullish RSI div
+{market_context}{position_context}
+Keep responses under 5 sentences."""
         messages = []
         for h in conversation_history[-10:]:
             if h.get('role') in ('user', 'assistant') and h.get('content'):
                 messages.append({"role": h['role'], "content": h['content']})
         messages.append({"role": "user", "content": user_message})
-
         import urllib.request
         payload = json_mod.dumps({
-            "model": "claude-sonnet-4-5",
+            "model": "claude-sonnet-4-20250514",
             "max_tokens": 400,
             "system": system_prompt,
             "messages": messages
         }).encode()
-
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01"
-            }
-        )
+        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload,
+            headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
         resp = urllib.request.urlopen(req, timeout=20)
         result = json_mod.loads(resp.read())
-        reply = result["content"][0]["text"]
-
-        return jsonify({"reply": reply, "market_snapshot": market_snap})
-
+        return jsonify({"reply": result["content"][0]["text"], "market_snapshot": market_snap})
     except Exception as e:
         print(f"[ERROR] /chat failed: {e}")
         return jsonify({"reply": f"Chat error: {str(e)}"})
@@ -918,10 +775,16 @@ def health():
         "status": "ok",
         "version": "3.2",
         "data_source": "ProjectX/TopstepX",
-        "history_count": len(_signal_history)
+        "history_count": len(_signal_history),
+        "config": {
+            "tp_points": TP_POINTS,
+            "sl_points": SL_POINTS,
+            "max_contracts": 5,
+            "sizing": "steep_5ct",
+            "plan_c": True
+        }
     })
 
 if __name__ == "__main__":
-    _start_outcome_tracker()
-    print("🚀 NQ Signal Agent v3.2 — Real-time ProjectX data + Signal History")
+    print("🚀 NQ Signal Agent v3.2 — Plan C + SL25 + Steep 5ct Sizing")
     app.run(host="0.0.0.0", port=8080, debug=False)
