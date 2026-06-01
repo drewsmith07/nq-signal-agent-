@@ -122,10 +122,7 @@ def _resolve_front_month():
         print(f"[Contract] Auto-resolve failed: {e}")
     return 'CON.F.US.ENQ.U26'
 
-try:
-    NQ_CONTRACT = _resolve_front_month()
-except:
-    NQ_CONTRACT = 'CON.F.US.ENQ.U26'
+NQ_CONTRACT = 'CON.F.US.ENQ.M26'  # Front month — update to U26 on June rollover
 print(f"[Contract] Using: {NQ_CONTRACT}")
 
 def get_px_token():
