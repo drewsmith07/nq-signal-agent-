@@ -755,7 +755,7 @@ Keep responses under 5 sentences."""
         messages.append({"role": "user", "content": user_message})
         import urllib.request
         payload = json_mod.dumps({
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-3-5-haiku-20241022",
             "max_tokens": 400,
             "system": system_prompt,
             "messages": messages
