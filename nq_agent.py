@@ -122,7 +122,10 @@ def _resolve_front_month():
         print(f"[Contract] Auto-resolve failed: {e}")
     return 'CON.F.US.ENQ.U26'
 
-NQ_CONTRACT = _resolve_front_month()
+try:
+    NQ_CONTRACT = _resolve_front_month()
+except:
+    NQ_CONTRACT = 'CON.F.US.ENQ.U26'
 print(f"[Contract] Using: {NQ_CONTRACT}")
 
 def get_px_token():
@@ -768,6 +771,41 @@ Keep responses under 5 sentences."""
     except Exception as e:
         print(f"[ERROR] /chat failed: {e}")
         return jsonify({"reply": f"Chat error: {str(e)}"})
+
+@app.route('/contract')
+def get_contract():
+    """Debug endpoint — shows current contract and tests bar fetch."""
+    try:
+        token = get_px_token()
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        r = requests.post(f'{PX_BASE_URL}/Contract/search',
+            headers=headers,
+            json={'searchText': 'ENQ', 'live': False},
+            timeout=10)
+        contracts = r.json().get('contracts', [])
+        from datetime import timezone as tz
+        now = datetime.now(timezone.utc)
+        valid = []
+        for c in contracts:
+            exp = c.get('expirationDate') or c.get('expiration') or ''
+            try:
+                exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                if exp_dt > now:
+                    valid.append({
+                        'id': c['id'],
+                        'name': c.get('name', ''),
+                        'expiration': exp,
+                        'active': True
+                    })
+            except:
+                valid.append({'id': c.get('id'), 'name': c.get('name', ''), 'raw': c})
+        return jsonify({
+            'current_contract': NQ_CONTRACT,
+            'all_enq_contracts': contracts[:5],
+            'valid_future': valid
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
 
 @app.route('/health')
 def health():
