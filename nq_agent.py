@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NQ Futures Scalping Signal Agent - v3.2
+NQ Futures Scalping Signal Agent - v3.3
 Real-time data via ProjectX/TopstepX API — zero lag
 + Signal history logging (persists to signals_log.json)
 
@@ -10,6 +10,12 @@ v3.2 changes (June 1, 2026):
   3. Steep 5-contract scaling: 4ct at 0.52+, 5ct at 0.56+ (eval accounts only)
   4. Plan C: hard block BUY on bearish RSI divergence, SELL on bullish divergence
   Backtest result: 96 signals, 51% WR, $118,100 net P&L over 60 days
+
+v3.3 changes (June 2, 2026):
+  1. 15m EMA 9/21 trend filter added as pre-signal gate
+     - BUY only fires when 15m EMA9 > EMA21 (uptrend confirmed)
+     - SELL only fires when 15m EMA9 < EMA21 (downtrend confirmed)
+  Backtest result: 85 signals, 58.8% WR, $139,000 net P&L over 60 days
 """
 
 import pandas as pd
@@ -290,6 +296,28 @@ def _detect_ob(df, i, lookback=20):
             if ol <= cp <= oh: return -1, min((oh-ol)/15.0, 1.0)
     return 0, 0.0
 
+def _check_15m_ema_trend(df_15m, signal):
+    """
+    v3.3: 15m EMA 9/21 trend filter.
+    Returns True if 15m trend aligns with signal direction.
+    BUY  requires EMA9 > EMA21 on 15m (uptrend)
+    SELL requires EMA9 < EMA21 on 15m (downtrend)
+    """
+    try:
+        if df_15m is None or len(df_15m) < 22:
+            return True  # not enough data — don't block, pass through
+        close = df_15m['Close']
+        ema9  = close.ewm(span=9,  adjust=False).mean().iloc[-1]
+        ema21 = close.ewm(span=21, adjust=False).mean().iloc[-1]
+        if signal == 'BUY':
+            return ema9 > ema21
+        elif signal == 'SELL':
+            return ema9 < ema21
+        return True
+    except Exception as e:
+        print(f"[15m EMA] check failed: {e}")
+        return True  # fail open — never silently block signals on error
+
 def _get_window(timestamp):
     import pytz
     PST = pytz.timezone('US/Pacific')
@@ -357,7 +385,7 @@ def _get_contracts(score_abs):
     elif score_abs >= 0.40: return 2  # FIX 2: was 0.45
     else:                   return 1
 
-def generate_signal(df_5m, df_1h=None, df_1m=None):
+def generate_signal(df_5m, df_1h=None, df_1m=None, df_15m=None):
     i = len(df_5m) - 1
     if i < 30: return None
 
@@ -433,6 +461,13 @@ def generate_signal(df_5m, df_1h=None, df_1m=None):
         final = 0.0
     else:
         signal = "BUY" if final > thr else "SELL" if final < -thr else "HOLD"
+
+    # ── v3.3: 15m EMA 9/21 Trend Filter ─────────────────────────────────────
+    if signal in ("BUY", "SELL") and not _check_15m_ema_trend(df_15m, signal):
+        reasons.append(f"⛔ {signal} blocked: 15m EMA trend not aligned")
+        signal = "HOLD"
+        final  = 0.0
+    # ─────────────────────────────────────────────────────────────────────────
 
     confidence = min(abs(final) * 100, 95)
     contracts = _get_contracts(abs(final)) if signal != "HOLD" else 0
@@ -585,11 +620,12 @@ def get_signal():
         df_5m = df_main if tf == '5m' else get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
         df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
         df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
+        df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
 
         if df_5m.empty:
             return jsonify({"error": "No data returned"}), 500
 
-        result = generate_signal(df_5m, df_1h, df_1m)
+        result = generate_signal(df_5m, df_1h, df_1m, df_15m)
         if result is None:
             return jsonify({"error": "Not enough bars"}), 500
 
@@ -637,7 +673,8 @@ def get_commentary():
         df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
         df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
         df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
-        result = generate_signal(df_5m, df_1h, df_1m)
+        df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
+        result = generate_signal(df_5m, df_1h, df_1m, df_15m)
         sig = result["signal"]; price = result["price"]; conf = result["confidence"]
         score = result["score"]; ind = result["indicators"]
         prompt = f"""You are a trading coach explaining NQ futures signals. Be clear and educational.
@@ -726,7 +763,8 @@ def chat():
             df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
             df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
             df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
-            market = generate_signal(df_5m, df_1h, df_1m)
+            df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
+            market = generate_signal(df_5m, df_1h, df_1m, df_15m)
             market_context = f"""
 LIVE MARKET DATA:
 - NQ Price: {market['price']} | Signal: {market['signal']} | Score: {market['score']} | Confidence: {market['confidence']}%
@@ -743,9 +781,10 @@ LIVE MARKET DATA:
         if position and position.get('side'):
             position_context = f"\nCURRENT POSITION: {position.get('side')} | Entry: {position.get('entry')} | {position.get('contracts')} cts | P&L: ${position.get('pnl')}"
         system_prompt = f"""You are an expert NQ futures scalping assistant. Be direct and concise.
-v3.2 system: TP=60pts, SL=25pts, R/R=2.4:1 | Sessions: London (2-4am PST) + US (6:30-10:30am PST)
+v3.3 system: TP=60pts, SL=25pts, R/R=2.4:1 | Sessions: London (2-4am PST) + US (6:30-10:30am PST)
 Sizing: 1ct(<0.40), 2ct(0.40-0.48), 3ct(0.48-0.52), 4ct(0.52-0.56), 5ct(>0.56)
 Plan C active: BUY blocked on bearish RSI div, SELL blocked on bullish RSI div
+15m EMA filter: BUY requires EMA9>EMA21 on 15m, SELL requires EMA9<EMA21 on 15m
 {market_context}{position_context}
 Keep responses under 5 sentences."""
         messages = []
@@ -808,7 +847,7 @@ def get_contract():
 def health():
     return jsonify({
         "status": "ok",
-        "version": "3.2",
+        "version": "3.3",
         "data_source": "ProjectX/TopstepX",
         "history_count": len(_signal_history),
         "config": {
@@ -816,10 +855,11 @@ def health():
             "sl_points": SL_POINTS,
             "max_contracts": 5,
             "sizing": "steep_5ct",
-            "plan_c": True
+            "plan_c": True,
+            "filter_15m_ema": True
         }
     })
 
 if __name__ == "__main__":
-    print("🚀 NQ Signal Agent v3.2 — Plan C + SL25 + Steep 5ct Sizing")
+    print("🚀 NQ Signal Agent v3.3 — 15m EMA Trend Filter + Plan C + SL25 + Steep 5ct Sizing")
     app.run(host="0.0.0.0", port=8080, debug=False)
