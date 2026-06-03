@@ -683,7 +683,7 @@ Price: {price} | VWAP: {ind['vwap']} | RSI: {ind['rsi']} | MACD: {ind['macd_hist
 BB Position: {ind['bb_position']*100:.0f}% | Support: {result['support']} | Resistance: {result['resistance']}
 Volume: {result['volume']['ratio']}x | Reasons: {'; '.join(result['reasons'])}
 Write 3-4 sentences explaining the signal in plain English."""
-        data = json_mod.dumps({"model": "claude-3-5-haiku-20241022", "max_tokens": 300,
+        data = json_mod.dumps({"model": "claude-haiku-4-5-20251001", "max_tokens": 300,
             "messages": [{"role": "user", "content": prompt}]}).encode()
         req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=data,
             headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": "2023-06-01"})
@@ -794,7 +794,7 @@ Keep responses under 5 sentences."""
         messages.append({"role": "user", "content": user_message})
         import urllib.request
         payload = json_mod.dumps({
-            "model": "claude-3-5-haiku-20241022",
+            "model": "claude-haiku-4-5-20251001",
             "max_tokens": 400,
             "system": system_prompt,
             "messages": messages
