@@ -766,8 +766,8 @@ def chat():
             df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
             market = generate_signal(df_5m, df_1h, df_1m, df_15m)
             # Build candle summary from df_5m
-        candle_summary = ""
         try:
+            candle_summary = ""
             candle_rows = []
             df_c = df_5m.tail(15)
             for idx, row in df_c.iterrows():
