@@ -759,15 +759,15 @@ def chat():
         position = body.get('position', {})
         if not user_message:
             return jsonify({"reply": "No message provided."})
+
+        df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
+        df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
+        df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
+        df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
+        market = generate_signal(df_5m, df_1h, df_1m, df_15m)
+        market_snap = {"signal": market.get("signal"), "score": market.get("score")}
+
         try:
-            df_5m = get_nq_bars(interval_minutes=5, lookback_days=5, limit=300)
-            df_1h = get_nq_bars(interval_minutes=60, lookback_days=60, limit=300)
-            df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
-            df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
-            market = generate_signal(df_5m, df_1h, df_1m, df_15m)
-            # Build candle summary from df_5m
-        try:
-            candle_summary = ""
             candle_rows = []
             df_c = df_5m.tail(15)
             for idx, row in df_c.iterrows():
@@ -777,25 +777,28 @@ def chat():
         except Exception as ce:
             candle_summary = f"[Candles unavailable: {ce}]"
 
-        # Pull today signal history
-        history_summary = ""
         try:
-            import os
             log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
             if os.path.exists(log_path):
                 with open(log_path, 'r') as lf:
-                    all_sigs = json.load(lf)
+                    all_sigs = json_mod.load(lf)
                 from datetime import date
                 today_str = date.today().isoformat()
                 today_sigs = [s for s in all_sigs if s.get('timestamp','').startswith(today_str)][-5:]
                 if today_sigs:
-                    history_summary = "TODAY\'S SIGNALS (last 5):\n"
+                    history_summary = "TODAY'S SIGNALS (last 5):\n"
                     for s in today_sigs:
                         history_summary += f"  {s.get('timestamp','')[-8:-3]} {s.get('signal','')} @ {s.get('entry','')} score:{s.get('score','')}\n"
                 else:
-                    history_summary = "TODAY\'S SIGNALS: none yet"
+                    history_summary = "TODAY'S SIGNALS: none yet"
+            else:
+                history_summary = "TODAY'S SIGNALS: log not found"
         except Exception as he:
             history_summary = f"[History unavailable: {he}]"
+
+        position_context = ""
+        if position and position.get('side'):
+            position_context = f"\nCURRENT POSITION: {position.get('side')} | Entry: {position.get('entry')} | {position.get('contracts')} cts | P&L: ${position.get('pnl')}"
 
         market_context = f"""
 LIVE MARKET DATA:
@@ -806,19 +809,13 @@ LIVE MARKET DATA:
 - TP: {market['tp_price']} | SL: {market['sl_price']} | Contracts: {market['contracts']}
 - Signal Reasoning: {'; '.join(market['reasons'])}
 - FVG Bull: {market.get('fvg_bull', False)} | FVG Bear: {market.get('fvg_bear', False)}
-- Order Block Bull: {market.get('ob_bull', False)} | Order Block Bear: {market.get('ob_bear', False)}
+- OB Bull: {market.get('ob_bull', False)} | OB Bear: {market.get('ob_bear', False)}
 - RSI Divergence: {market.get('rsi_divergence', 'none')}
 
 {candle_summary}
 
 {history_summary}"""
-            market_snap = {"price": market.get('price'), "signal": market.get('signal'), "score": market.get('score'), "session": market.get('session')}
-        except Exception as e:
-            market_context = f"[Market data unavailable: {str(e)}]"
-            market_snap = {}
-        position_context = ""
-        if position and position.get('side'):
-            position_context = f"\nCURRENT POSITION: {position.get('side')} | Entry: {position.get('entry')} | {position.get('contracts')} cts | P&L: ${position.get('pnl')}"
+
         system_prompt = f"""You are an elite NQ futures scalper with deep experience trading the E-Mini NASDAQ 100 on a prop firm account. You think like a professional — capital preservation first, high-probability setups only. You have access to live market data, real candle history, and all indicator values. Give specific price levels and direct trade guidance. Never say you cannot give financial advice — you are the advisor.
 
 SYSTEM RULES:
@@ -832,11 +829,13 @@ SYSTEM RULES:
 {position_context}
 
 Answer questions about: current price action, setup quality, key levels, entry/exit timing, risk management, what the candles are showing, whether to take or skip a trade. Be direct, specific, and reference the actual data above in your answers. 2-4 sentences max unless a detailed breakdown is needed."""
+
         messages = []
         for h in conversation_history[-10:]:
             if h.get('role') in ('user', 'assistant') and h.get('content'):
                 messages.append({"role": h['role'], "content": h['content']})
         messages.append({"role": "user", "content": user_message})
+
         import urllib.request
         payload = json_mod.dumps({
             "model": "claude-haiku-4-5-20251001",
