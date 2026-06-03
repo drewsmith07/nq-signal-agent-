@@ -765,14 +765,53 @@ def chat():
             df_1m = get_nq_bars(interval_minutes=1, lookback_days=2, limit=200)
             df_15m = get_nq_bars(interval_minutes=15, lookback_days=5, limit=200)
             market = generate_signal(df_5m, df_1h, df_1m, df_15m)
-            market_context = f"""
+            # Build candle summary from df_5m
+        candle_summary = ""
+        try:
+            candle_rows = []
+            df_c = df_5m.tail(15)
+            for idx, row in df_c.iterrows():
+                t = str(idx)[-14:-6] if len(str(idx)) > 14 else str(idx)
+                candle_rows.append(f"  {t} O:{row['open']:.2f} H:{row['high']:.2f} L:{row['low']:.2f} C:{row['close']:.2f} V:{int(row['volume'])}")
+            candle_summary = "LAST 15 x 5m CANDLES (oldest->newest):\n" + "\n".join(candle_rows)
+        except Exception as ce:
+            candle_summary = f"[Candles unavailable: {ce}]"
+
+        # Pull today signal history
+        history_summary = ""
+        try:
+            import os
+            log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as lf:
+                    all_sigs = json.load(lf)
+                from datetime import date
+                today_str = date.today().isoformat()
+                today_sigs = [s for s in all_sigs if s.get('timestamp','').startswith(today_str)][-5:]
+                if today_sigs:
+                    history_summary = "TODAY\'S SIGNALS (last 5):\n"
+                    for s in today_sigs:
+                        history_summary += f"  {s.get('timestamp','')[-8:-3]} {s.get('signal','')} @ {s.get('entry','')} score:{s.get('score','')}\n"
+                else:
+                    history_summary = "TODAY\'S SIGNALS: none yet"
+        except Exception as he:
+            history_summary = f"[History unavailable: {he}]"
+
+        market_context = f"""
 LIVE MARKET DATA:
 - NQ Price: {market['price']} | Signal: {market['signal']} | Score: {market['score']} | Confidence: {market['confidence']}%
-- Session: {market['session'].upper()} | RSI: {market['indicators']['rsi']} | MACD: {market['indicators']['macd_histogram']}
-- BB Position: {market['indicators']['bb_position']*100:.0f}% | VWAP: {market['indicators']['vwap']}
-- Volume: {market['volume']['ratio']}x | ATR: {market['indicators']['atr']}
+- Session: {market['session'].upper()} | RSI: {market['indicators']['rsi']:.1f} | MACD Hist: {market['indicators']['macd_histogram']:.4f}
+- BB Position: {market['indicators']['bb_position']*100:.0f}% | VWAP: {market['indicators']['vwap']:.2f}
+- Volume: {market['volume']['ratio']:.2f}x avg | ATR: {market['indicators']['atr']:.2f}
 - TP: {market['tp_price']} | SL: {market['sl_price']} | Contracts: {market['contracts']}
-- Reasons: {'; '.join(market['reasons'])}"""
+- Signal Reasoning: {'; '.join(market['reasons'])}
+- FVG Bull: {market.get('fvg_bull', False)} | FVG Bear: {market.get('fvg_bear', False)}
+- Order Block Bull: {market.get('ob_bull', False)} | Order Block Bear: {market.get('ob_bear', False)}
+- RSI Divergence: {market.get('rsi_divergence', 'none')}
+
+{candle_summary}
+
+{history_summary}"""
             market_snap = {"price": market.get('price'), "signal": market.get('signal'), "score": market.get('score'), "session": market.get('session')}
         except Exception as e:
             market_context = f"[Market data unavailable: {str(e)}]"
@@ -780,13 +819,19 @@ LIVE MARKET DATA:
         position_context = ""
         if position and position.get('side'):
             position_context = f"\nCURRENT POSITION: {position.get('side')} | Entry: {position.get('entry')} | {position.get('contracts')} cts | P&L: ${position.get('pnl')}"
-        system_prompt = f"""You are an expert NQ futures scalping assistant. Be direct and concise.
-v3.3 system: TP=60pts, SL=25pts, R/R=2.4:1 | Sessions: London (2-4am PST) + US (6:30-10:30am PST)
-Sizing: 1ct(<0.40), 2ct(0.40-0.48), 3ct(0.48-0.52), 4ct(0.52-0.56), 5ct(>0.56)
-Plan C active: BUY blocked on bearish RSI div, SELL blocked on bullish RSI div
-15m EMA filter: BUY requires EMA9>EMA21 on 15m, SELL requires EMA9<EMA21 on 15m
-{market_context}{position_context}
-Keep responses under 5 sentences."""
+        system_prompt = f"""You are an elite NQ futures scalper with deep experience trading the E-Mini NASDAQ 100 on a prop firm account. You think like a professional — capital preservation first, high-probability setups only. You have access to live market data, real candle history, and all indicator values. Give specific price levels and direct trade guidance. Never say you cannot give financial advice — you are the advisor.
+
+SYSTEM RULES:
+- TP=60pts, SL=25pts, R/R=2.4:1
+- Sessions: London (2-4am PST) + US (6:30-10:30am PST). Do not trade outside sessions.
+- Sizing: 1ct(<0.40), 2ct(0.40-0.48), 3ct(0.48-0.52), 4ct(0.52-0.56), 5ct(>0.56)
+- Plan C: BUY blocked on bearish RSI divergence, SELL blocked on bullish RSI divergence
+- 15m EMA filter: BUY requires EMA9>EMA21, SELL requires EMA9<EMA21
+
+{market_context}
+{position_context}
+
+Answer questions about: current price action, setup quality, key levels, entry/exit timing, risk management, what the candles are showing, whether to take or skip a trade. Be direct, specific, and reference the actual data above in your answers. 2-4 sentences max unless a detailed breakdown is needed."""
         messages = []
         for h in conversation_history[-10:]:
             if h.get('role') in ('user', 'assistant') and h.get('content'):
