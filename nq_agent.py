@@ -108,7 +108,7 @@ def _resolve_front_month():
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
         r = requests.post(f'{PX_BASE_URL}/Contract/search',
             headers=headers,
-            json={'searchText': 'ENQ', 'live': False},
+            json={'searchText': 'ENQ', 'live': True},
             timeout=10)
         contracts = r.json().get('contracts', [])
         now = datetime.now(timezone.utc)
@@ -860,7 +860,7 @@ def get_contract():
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
         r = requests.post(f'{PX_BASE_URL}/Contract/search',
             headers=headers,
-            json={'searchText': 'ENQ', 'live': False},
+            json={'searchText': 'ENQ', 'live': True},
             timeout=10)
         contracts = r.json().get('contracts', [])
         from datetime import timezone as tz
