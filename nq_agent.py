@@ -34,7 +34,34 @@ CORS(app)
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
 _signal_history = []
 
-def _load_history():
+def 
+def _log_to_notion(entry):
+    if not NOTION_TOKEN:
+        return
+    try:
+        import requests as _req
+        signal = entry.get("signal", "UNKNOWN")
+        direction = "BUY" if "BUY" in str(signal).upper() else "SELL" if "SELL" in str(signal).upper() else None
+        fired_at = entry.get("logged_at", "")[:10]
+        props = {
+            "Signal": {"title": [{"text": {"content": f"{signal} @ {entry.get('price', '?')}"}}]},
+            "Price": {"number": entry.get("price")},
+            "TP Price": {"number": entry.get("tp_price")},
+            "SL Price": {"number": entry.get("sl_price")},
+            "Confidence": {"number": entry.get("confidence")},
+            "Session": {"select": {"name": entry.get("session", "Unknown")}},
+            "Result": {"select": {"name": "Open"}},
+            "Fired At": {"date": {"start": fired_at}}
+        }
+        if direction:
+            props["Direction"] = {"select": {"name": direction}}
+        _req.post("https://api.notion.com/v1/pages",
+            headers={"Authorization": f"Bearer {NOTION_TOKEN}", "Notion-Version": "2022-06-28", "Content-Type": "application/json"},
+            json={"parent": {"database_id": NOTION_SIGNAL_DB}, "properties": props})
+    except Exception as e:
+        print(f"[Notion] Failed to log signal: {e}")
+
+_load_history():
     global _signal_history
     try:
         if os.path.exists(LOG_FILE):
@@ -87,6 +114,7 @@ def _log_signal(result):
         "pnl":        None,
     }
     _signal_history.append(entry)
+    _log_to_notion(entry)
     if len(_signal_history) > 5000:
         _signal_history.pop(0)
     _save_history()
@@ -97,6 +125,12 @@ _load_history()
 PX_USERNAME = 'drewksmith602@gmail.com'
 PX_API_KEY  = '2AEN4l/nMCiRnnJXOZRed3kjOWfczuszBKZogj+1njM='
 PX_BASE_URL = 'https://api.topstepx.com/api'
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
+NOTION_SIGNAL_DB = "c2068631-1c42-4fc2-89bd-94b86cae01c4"
+
+
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
+NOTION_SIGNAL_DB = "c2068631-1c42-4fc2-89bd-94b86cae01c4"
 
 _px_token = None
 _px_token_expiry = None
