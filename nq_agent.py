@@ -34,7 +34,6 @@ CORS(app)
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'signals_log.json')
 _signal_history = []
 
-def 
 def _log_to_notion(entry):
     if not NOTION_TOKEN:
         return
