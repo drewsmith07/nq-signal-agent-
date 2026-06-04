@@ -60,7 +60,7 @@ def _log_to_notion(entry):
     except Exception as e:
         print(f"[Notion] Failed to log signal: {e}")
 
-_load_history():
+_load_history()
     global _signal_history
     try:
         if os.path.exists(LOG_FILE):
