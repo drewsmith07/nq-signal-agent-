@@ -149,30 +149,19 @@ def get_px_token():
     return _px_token
 
 def get_nq_bars(interval_minutes=5, lookback_days=5, limit=300):
-    token = get_px_token()
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-    start = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    end = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    r = requests.post(f'{PX_BASE_URL}/History/retrieveBars', headers=headers,
-        json={
-            'contractId': NQ_CONTRACT,
-            'live': False,
-            'startTime': start,
-            'endTime': end,
-            'unit': 2,
-            'unitNumber': interval_minutes,
-            'limit': limit,
-            'includePartialBar': False
-        }, timeout=15)
-    data = r.json()
-    bars = data.get('bars', [])
-    if not bars:
-        raise Exception(f"No bars returned from ProjectX: {data}")
-    df = pd.DataFrame(bars)
-    df.rename(columns={'t':'Datetime','o':'Open','h':'High','l':'Low','c':'Close','v':'Volume'}, inplace=True)
-    df['Datetime'] = pd.to_datetime(df['Datetime'], utc=True)
-    df = df.sort_values('Datetime').reset_index(drop=True)
-    df.set_index('Datetime', inplace=True)
+    import yfinance as yf
+    interval_map = {1: '1m', 5: '5m', 15: '15m', 60: '1h'}
+    yf_interval = interval_map.get(interval_minutes, '5m')
+    period_map = {1: '7d', 5: '60d', 15: '60d', 60: '60d'}
+    yf_period = period_map.get(interval_minutes, '60d')
+    df = yf.download('NQ=F', period=yf_period, interval=yf_interval, progress=False, auto_adjust=True)
+    if df.empty:
+        raise Exception("No bars returned from yfinance")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df.index = pd.to_datetime(df.index, utc=True)
+    df = df.sort_index()
+    df = df.tail(limit)
     return df
 
 # ─── Economic Calendar ────────────────────────────────────────────────────────
