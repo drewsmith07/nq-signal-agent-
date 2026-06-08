@@ -941,7 +941,7 @@ window.addEventListener('load', () => {
   initChart();
   fetchSignal();
   fetchCommentary();
-  setInterval(fetchSignal, 5*60*1000);
+  setInterval(fetchSignal, 60*1000);
   // Refresh history every 5 min if on that tab
   setInterval(() => {
     if (document.getElementById('tab-history').classList.contains('active')) fetchHistory();

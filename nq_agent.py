@@ -256,8 +256,22 @@ def bollinger_bands(series, period=20):
     return sma + 2*std, sma, sma - 2*std
 
 def vwap(df):
-    tp = (df['High'] + df['Low'] + df['Close']) / 3
-    return (tp * df['Volume']).cumsum() / df['Volume'].cumsum()
+    import pytz
+    pst = pytz.timezone('US/Pacific')
+    df2 = df.copy()
+    try:
+        idx = df2.index.tz_convert(pst)
+    except:
+        idx = df2.index.tz_localize('UTC').tz_convert(pst)
+    today = idx[-1].date()
+    mask = idx.date == today
+    df_today = df2[mask]
+    if len(df_today) < 2:
+        df_today = df2  # fallback to full df if not enough today bars
+    tp = (df_today['High'] + df_today['Low'] + df_today['Close']) / 3
+    vwap_today = (tp * df_today['Volume']).cumsum() / df_today['Volume'].cumsum()
+    # Reindex back to full df, forward-fill so all rows have a value
+    return vwap_today.reindex(df2.index, method='ffill')
 
 def atr(df, period=14):
     hl = df['High'] - df['Low']
@@ -484,6 +498,8 @@ def generate_signal(df_5m, df_1h=None, df_1m=None, df_15m=None):
     else:
         signal = "BUY" if final > thr else "SELL" if final < -thr else "HOLD"
 
+    reasons = []
+
     # ── v3.3: 15m EMA 9/21 Trend Filter ─────────────────────────────────────
     if signal in ("BUY", "SELL") and not _check_15m_ema_trend(df_15m, signal):
         reasons.append(f"⛔ {signal} blocked: 15m EMA trend not aligned")
@@ -493,8 +509,6 @@ def generate_signal(df_5m, df_1h=None, df_1m=None, df_15m=None):
 
     confidence = min(abs(final) * 100, 95)
     contracts = _get_contracts(abs(final)) if signal != "HOLD" else 0
-
-    reasons = []
     if in_event_window: reasons.append("⚠️ HIGH-IMPACT EVENT WINDOW")
     if window: reasons.append(f"Session: {window.upper()}")
     if crossed_bull: reasons.append("MACD bullish crossover ✦")
@@ -794,7 +808,7 @@ def chat():
             df_c = df_5m.tail(15)
             for idx, row in df_c.iterrows():
                 t = str(idx)[-14:-6] if len(str(idx)) > 14 else str(idx)
-                candle_rows.append(f"  {t} O:{row['open']:.2f} H:{row['high']:.2f} L:{row['low']:.2f} C:{row['close']:.2f} V:{int(row['volume'])}")
+                candle_rows.append(f"  {t} O:{row['Open']:.2f} H:{row['High']:.2f} L:{row['Low']:.2f} C:{row['Close']:.2f} V:{int(row['Volume'])}")
             candle_summary = "LAST 15 x 5m CANDLES (oldest->newest):\n" + "\n".join(candle_rows)
         except Exception as ce:
             candle_summary = f"[Candles unavailable: {ce}]"
@@ -810,7 +824,7 @@ def chat():
                 if today_sigs:
                     history_summary = "TODAY'S SIGNALS (last 5):\n"
                     for s in today_sigs:
-                        history_summary += f"  {s.get('timestamp','')[-8:-3]} {s.get('signal','')} @ {s.get('entry','')} score:{s.get('score','')}\n"
+                        history_summary += f"  {s.get('timestamp','')[-8:-3]} {s.get('signal','')} @ {s.get('price','')} score:{s.get('score','')}\n"
                 else:
                     history_summary = "TODAY'S SIGNALS: none yet"
             else:
@@ -913,7 +927,7 @@ def get_contract():
 def health():
     return jsonify({
         "status": "ok",
-        "version": "3.3",
+        "version": "3.4",
         "data_source": "ProjectX/TopstepX",
         "history_count": len(_signal_history),
         "config": {
@@ -927,5 +941,5 @@ def health():
     })
 
 if __name__ == "__main__":
-    print("🚀 NQ Signal Agent v3.3 — 15m EMA Trend Filter + Plan C + SL25 + Steep 5ct Sizing")
+    print("🚀 NQ Signal Agent v3.4 — 15m EMA Trend Filter + Plan C + SL25 + Steep 5ct Sizing")
     app.run(host="0.0.0.0", port=8080, debug=False)
