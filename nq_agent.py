@@ -442,14 +442,8 @@ def generate_signal(df_5m, df_1h=None, df_1m=None, df_15m=None):
     thr = 0.45 if window == 'london' else 0.38
     xwin = 3 if window == 'london' else 5
 
-    crossed_bull = any(
-        histogram.iloc[-(k+1)] > 0 and histogram.iloc[-(k+2)] <= 0
-        for k in range(xwin) if i-k-1 >= 0
-    )
-    crossed_bear = any(
-        histogram.iloc[-(k+1)] < 0 and histogram.iloc[-(k+2)] >= 0
-        for k in range(xwin) if i-k-1 >= 0
-    )
+    crossed_bull = all(histogram.iloc[-(k+1)] > 0 for k in range(3)) and any(histogram.iloc[-(j+1)] <= 0 for j in range(3,8))
+    crossed_bear = all(histogram.iloc[-(k+1)] < 0 for k in range(3)) and any(histogram.iloc[-(j+1)] >= 0 for j in range(3,8))
 
     # ── PLAN C: RSI Divergence Hard Block (v3.2) ─────────────────────────────
     rsi_s = rsi(close)
